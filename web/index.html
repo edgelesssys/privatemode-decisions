@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privatemode Decisions</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --paper: #ffffff; --ink: #1c1b18; --muted: #6f6c64; --line: #e8e4dc;
+    --accent: #ff5a1f; --accent-soft: #ffe7dc; --accent-ink: #b33a09; --bar: #f0ece4; --ok: #178a4c;
+    --shadow: 0 1px 2px rgba(28,27,24,.05), 0 8px 30px rgba(28,27,24,.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 -apple-system, "Segoe UI", Inter, system-ui, sans-serif; }
+  header { padding: 30px 32px 6px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: -.4px; }
+  header .sub { color: var(--muted); }
+  header .with { font-weight: 500; color: var(--muted); }
+  header .with a { color: var(--accent-ink); text-decoration: none; border-bottom: 2px solid var(--accent-soft); }
+  header .with a:hover { border-bottom-color: var(--accent); }
+  main { max-width: 1180px; margin: 0 auto; padding: 14px 32px 60px; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 26px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 20px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+  textarea { width: 100%; min-height: 250px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 14px; font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); background: #fffdf9; }
+  textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .thumb { position: relative; width: 84px; height: 84px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #fff; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(28,27,24,.75); color: #fff; font-size: 13px; line-height: 22px; padding: 0; cursor: pointer; }
+  .hintline { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  button.run { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 11px 20px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button.run:hover { background: #e94d13; }
+  button.run:disabled { opacity: .55; cursor: default; }
+  select { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; font-size: 14px; color: var(--ink); }
+  .kbd { color: var(--muted); font-size: 13px; }
+  .samples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 7px 14px; font-size: 14px; cursor: pointer; color: var(--ink); transition: border-color .15s, background .15s; }
+  .chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .chip.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .why { color: var(--muted); font-size: 14px; margin-top: 10px; min-height: 1.5em; }
+  .error { background: #fff3ee; border: 1px solid #ffc9b3; color: var(--accent-ink); border-radius: 12px; padding: 14px 16px; font-size: 14px; white-space: pre-wrap; }
+  .error b { display: block; margin-bottom: 6px; }
+  .result { display: flex; flex-direction: column; gap: 22px; }
+  .q { }
+  .q .question { font-weight: 700; font-size: 17px; margin-bottom: 10px; letter-spacing: -.2px; }
+  .bars { display: grid; grid-template-columns: minmax(90px, max-content) 1fr 56px; gap: 8px 12px; align-items: center; }
+  .bars .name { font-size: 14px; text-align: right; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .bars .name.top { color: var(--accent-ink); font-weight: 700; }
+  .bars .track { height: 22px; background: var(--bar); border-radius: 7px; overflow: hidden; }
+  .bars .fill { height: 100%; background: #cfc9bd; border-radius: 7px; width: 0; transition: width .5s cubic-bezier(.2,.8,.2,1); }
+  .bars .fill.top { background: var(--accent); }
+  .bars .pct { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); text-align: right; }
+  .bars .pct.top { color: var(--accent-ink); font-weight: 700; }
+  .q .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .context { color: var(--muted); font-size: 13px; white-space: pre-wrap; border-left: 3px solid var(--line); padding-left: 10px; max-height: 120px; overflow: auto; }
+  .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+  .empty .big { font-size: 40px; margin-bottom: 8px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .drop textarea { border-color: var(--accent); background: var(--accent-soft); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Decisions <span class="with">with <a href="https://privatemode.ai" target="_blank" rel="noopener">Privatemode AI</a></span></h1>
+  <span class="sub">one forward pass per decision · no chain of thought · the answer is a probability distribution</span>
+</header>
+<main>
+  <section class="card" id="ask">
+    <div class="label">Context, then questions</div>
+    <textarea id="text" spellcheck="false" placeholder="Optional context on any lines you like.
+
+A question on one line
+choices: yes, no, unsure
+
+Or just a question: with no choices, yes/no is assumed.
+Paste an image anywhere on the page to add it to the context."></textarea>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="hintline">A question is a line followed by <b>choices: a, b, c</b>; with no choices at all, the last line is a yes/no question. Several questions share the same context and run in one round trip. An option can explain itself: <b>choices: repair = broken devices, sales = new orders</b>. Paste or drop images to add them.</div>
+    <div class="toolbar">
+      <button class="run" id="run">Ask</button>
+      <select id="model"></select>
+      <span class="kbd">⌘↩ / Ctrl↩ to ask</span>
+    </div>
+    <div class="label" style="margin-top:22px">Try one</div>
+    <div class="samples" id="samples"></div>
+    <div class="why" id="why"></div>
+  </section>
+  <section class="card" id="out">
+    <div class="empty"><div class="big">◔</div>Ask something. The bars are the model's whole distribution over your choices, read from a single token.</div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const text = $('text'), out = $('out'), why = $('why'), runBtn = $('run'), modelSel = $('model'), thumbs = $('thumbs');
+  const images = [];
+  const h = (tag, attrs = {}, ...kids) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) { if (v == null) continue; if (k === 'class') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v); }
+    for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+    return el;
+  };
+  text.value = localStorage.getItem('decisions.text') || '';
+  text.addEventListener('input', () => { localStorage.setItem('decisions.text', text.value); setActive(null); });
+
+  fetch('/api/models').then(r => r.json()).then(models => {
+    for (const m of models) modelSel.append(h('option', { value: m.id }, m.label));
+    const saved = localStorage.getItem('decisions.model');
+    modelSel.value = models.some(m => m.id === saved) ? saved : models[0].id;
+    modelSel.addEventListener('change', () => localStorage.setItem('decisions.model', modelSel.value));
+  });
+  let samples = [];
+  fetch('/api/samples').then(r => r.json()).then(list => {
+    samples = list;
+    $('samples').replaceChildren(...list.map((s, i) => h('button', { class: 'chip', 'data-i': i, onclick: () => { text.value = s.text; localStorage.setItem('decisions.text', s.text); setActive(i); ask(); } }, s.title)));
+  });
+  function setActive(i) {
+    for (const c of document.querySelectorAll('.chip')) c.classList.toggle('active', Number(c.dataset.i) === i);
+    why.textContent = i == null ? '' : samples[i].why;
+  }
+
+  // ---- images: paste anywhere, drop on the box, thumbnails with remove
+  let reading = 0;  // reads still in flight count against the cap, or a multi-file drop overshoots it
+  function addImage(file) {
+    if (!file || !file.type.startsWith('image/') || images.length + reading >= 6) return;
+    reading++;
+    const reader = new FileReader();
+    reader.onloadend = () => { reading--; };
+    reader.onload = () => { images.push(reader.result); renderThumbs(); };
+    reader.readAsDataURL(file);
+  }
+  function renderThumbs() {
+    thumbs.replaceChildren(...images.map((src, i) => h('div', { class: 'thumb', title: 'part of the context' }, h('img', { src }), h('button', { onclick: () => { images.splice(i, 1); renderThumbs(); } }, '×'))));
+  }
+  document.addEventListener('paste', (e) => {
+    const items = [...(e.clipboardData?.items || [])].filter(it => it.type.startsWith('image/'));
+    if (!items.length) return;
+    e.preventDefault();
+    for (const it of items) addImage(it.getAsFile());
+  });
+  $('ask').addEventListener('dragover', (e) => { e.preventDefault(); $('ask').classList.add('drop'); });
+  $('ask').addEventListener('dragleave', () => $('ask').classList.remove('drop'));
+  $('ask').addEventListener('drop', (e) => { e.preventDefault(); $('ask').classList.remove('drop'); for (const f of e.dataTransfer.files) addImage(f); });
+
+  // ---- ask
+  runBtn.addEventListener('click', ask);
+  document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); ask(); } });
+  let busy = false;
+  async function ask() {
+    if (busy) return;
+    busy = true; runBtn.disabled = true; runBtn.replaceChildren(h('span', { class: 'spinner' }), 'Asking…');
+    try {
+      const r = await fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: text.value, images, model: modelSel.value }) });
+      const data = await r.json();
+      if (!r.ok) { showError(data); return; }
+      showResult(data);
+    } catch (err) { showError({ error: String(err) }); }
+    finally { busy = false; runBtn.disabled = false; runBtn.textContent = 'Ask'; }
+  }
+  function showError(data) {
+    out.replaceChildren(h('div', { class: 'error' }, h('b', {}, data.error || 'error'), data.hint || ''));
+  }
+  function showResult(data) {
+    const blocks = data.questions.map(q => {
+      const ranked = Object.entries(q.probabilities).sort((a, b) => b[1] - a[1]);
+      const max = ranked[0][1];
+      const rows = ranked.map(([name, p]) => {
+        const top = name === q.choice;
+        return [h('div', { class: 'name' + (top ? ' top' : ''), title: name }, name),
+                h('div', { class: 'track' }, h('div', { class: 'fill' + (top ? ' top' : ''), 'data-w': (100 * p / Math.max(max, 1e-9)).toFixed(1) })),
+                h('div', { class: 'pct' + (top ? ' top' : '') }, (100 * p).toFixed(p >= 0.1 ? 0 : 1) + '%')];
+      });
+      return h('div', { class: 'q' }, h('div', { class: 'question' }, q.question), h('div', { class: 'bars' }, rows),
+               h('div', { class: 'meta' }, `${q.choice} · confidence ${(100 * q.confidence).toFixed(0)}%${q.assumed ? ' · no choices given, yes/no assumed' : ''}`));
+    });
+    out.replaceChildren(h('div', { class: 'result' },
+      data.context || data.images ? h('div', {}, h('div', { class: 'label' }, 'Context'), h('div', { class: 'context' }, [data.context, data.images ? `${data.images} image${data.images > 1 ? 's' : ''} attached` : ''].filter(Boolean).join('\n'))) : null,
+      ...blocks,
+      h('div', { class: 'footer' }, h('span', {}, data.model), h('span', {}, `${data.ms} ms for ${data.questions.length} question${data.questions.length > 1 ? 's' : ''}`), h('span', {}, `${data.usage.input_tokens} prompt tokens`))));
+    requestAnimationFrame(() => { for (const f of out.querySelectorAll('.fill')) f.style.width = f.dataset.w + '%'; });
+  }
+})();
+</script>
+</body>
+</html>

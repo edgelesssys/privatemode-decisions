@@ -1,0 +1,19 @@
+services:
+  privatemode-decisions:
+    build: .
+    image: privatemode-decisions
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8600:8600"      # a reverse proxy on the host terminates TLS and forwards here
+    env_file: .env                  # DECISIONS_API_KEY
+    environment:
+      # Plaintext stays on the compose network; the proxy encrypts from here on.
+      DECISIONS_BASE_URL: http://privatemode-proxy:8080/v1
+    depends_on:
+      - privatemode-proxy
+
+  privatemode-proxy:
+    image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:latest
+    restart: unless-stopped
+    command: ["--apiKey", "${DECISIONS_API_KEY}"]
+    # No published port: only the app on this network can reach it.
