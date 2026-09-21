@@ -1,0 +1,16 @@
+[project]
+name = "privatemode-system-one"
+version = "0.1.0"
+description = "System One with Privatemode AI: multiple-choice questions answered in one forward pass, with the distribution"
+requires-python = ">=3.10"
+dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "Pillow>=10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app", "system_one"]
