@@ -3,6 +3,8 @@ name = "privatemode-decisions"
 version = "0.1.0"
 description = "Privatemode Decisions: multiple-choice questions answered in one forward pass, with the distribution"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 # The library needs only the standard library; the extras are for resizing
 # images and for running the demo, which lives in app/ and is not installed.
 dependencies = []
@@ -13,7 +15,7 @@ demo = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "Pillow>=10"]
 dev = ["privatemode-decisions[demo]", "pytest>=8", "httpx>=0.27"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
