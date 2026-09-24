@@ -25,7 +25,55 @@ new orders`. Up to 32 choices per question (the answer is one token).
 Images pasted or dropped onto the page are sent as part of the context;
 pick a vision model for them.
 
-## Run
+## Use it in your own code
+
+1. Get a Privatemode API key: <https://portal.privatemode.ai/sign-in/create>.
+2. Run the Privatemode proxy. It verifies the deployment's attestation
+   report and encrypts every request before it leaves your machine:
+
+   ```sh
+   docker run -p 8082:8080 ghcr.io/edgelesssys/privatemode/privatemode-proxy:latest \
+     --apiKey "$PRIVATEMODE_API_KEY"
+   ```
+
+3. Install the library and ask:
+
+   ```sh
+   pip install git+https://github.com/edgelesssys/privatemode-system-one
+   ```
+
+   ```python
+   from system_one import Choice, OpenAIClient, SystemOne
+
+   engine = SystemOne(OpenAIClient("http://localhost:8082/v1"), "glm-flash-latest")
+   result = engine.system_one(
+       "A customer writes: I was charged twice for the same transfer on Monday.",
+       {
+           "team": Choice({
+               "payments": "wrong or duplicate charges",
+               "technical": "app and login problems",
+               "complaints": "escalations and repeat contacts",
+           }),
+           "urgent": Choice({"yes": None, "no": None}),
+       },
+   )
+   answer = result.answers["team"]
+   print(answer.choice, answer.probabilities, answer.confidence)
+   # payments {'payments': 0.999, 'technical': 0.0, 'complaints': 0.0} 1.0
+   ```
+
+Each question costs one forward pass and one output token, and the answer
+comes with the whole distribution over its options. Threshold on
+`confidence` (1 minus normalized entropy) to decide which answers a human
+should see.
+
+To build it with a coding agent, give Claude Code, Codex or the tool of
+your choice the post that explains the technique,
+<https://privatemode.ai/blog/system-one-from-glm-flash>, together with
+this repository. [AGENTS.md](AGENTS.md) lists what an implementation has
+to get right.
+
+## Run the web app
 
 ```sh
 uv venv --python 3.12 .venv && uv pip install -e '.[dev]'
