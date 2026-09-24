@@ -12,7 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 images = ["Pillow>=10"]
 demo = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "Pillow>=10"]
-dev = ["privatemode-decisions[demo]", "pytest>=8", "httpx>=0.27"]
+dev = ["privatemode-decisions[demo]", "pytest>=8", "httpx2>=2"]
 
 [build-system]
 requires = ["setuptools>=77"]

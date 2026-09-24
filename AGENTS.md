@@ -98,7 +98,7 @@ aren't URLs are read as file paths, so don't pass user input there.
 ## Working in this repository
 
 ```sh
-uv venv --python 3.12 .venv && uv pip install -e '.[dev]'
+uv venv --python 3.14 .venv && uv pip install -e '.[dev]'
 cp .env.example .env        # proxy URL and Privatemode API key
 .venv/bin/pytest -q tests   # CI runs this plus a docker build
 ./run.sh                    # the demo on http://127.0.0.1:8600

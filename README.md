@@ -144,7 +144,7 @@ choices: yes, no
 To run it:
 
 ```sh
-uv venv --python 3.12 .venv && uv pip install -e '.[dev]'
+uv venv --python 3.14 .venv && uv pip install -e '.[dev]'
 cp .env.example .env         # proxy URL and Privatemode API key
 ./run.sh                     # http://127.0.0.1:8600
 .venv/bin/pytest -q tests    # no model needed

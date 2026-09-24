@@ -100,7 +100,8 @@ def test_a_smaller_cap_is_honoured():
     engine, server = make_engine(max_logprob_ids=50)
     engine.system_one("state", {"intent": question(151)})
 
-    assert [len(p["logprob_token_ids"]) for p in server.payloads] == [50, 50, 50, 1]
+    # The batches run in parallel, so they arrive in any order.
+    assert sorted(len(p["logprob_token_ids"]) for p in server.payloads) == [1, 50, 50, 50]
 
 
 def test_a_missing_option_logprob_is_an_error():
