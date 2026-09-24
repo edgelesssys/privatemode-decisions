@@ -1,6 +1,6 @@
 """The demo backend: parse the text box, ask the model, return the distributions.
 
-    DECISIONS_BASE_URL=http://localhost:8082/v1 DECISIONS_API_KEY=... uvicorn app.main:app
+    DECISIONS_BASE_URL=http://localhost:8080/v1 DECISIONS_API_KEY=... uvicorn app.main:app
 
 Both variables are also read from a ``.env`` file in the repository root.
 The library is ``decisions/`` in this repository, used as it is.

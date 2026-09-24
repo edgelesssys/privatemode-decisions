@@ -32,7 +32,7 @@ explains the technique and benchmarks it against Jev on 29 datasets.
    use your key.
 
    ```sh
-   docker run -p 127.0.0.1:8082:8080 ghcr.io/edgelesssys/privatemode/privatemode-proxy:latest \
+   docker run -p 127.0.0.1:8080:8080 ghcr.io/edgelesssys/privatemode/privatemode-proxy:latest \
      --apiKey "$PRIVATEMODE_API_KEY"
    ```
 
@@ -46,7 +46,7 @@ explains the technique and benchmarks it against Jev on 29 datasets.
    ```python
    from decisions import Choice, OpenAIClient, SystemOne
 
-   engine = SystemOne(OpenAIClient("http://localhost:8082/v1"), "glm-flash-latest")
+   engine = SystemOne(OpenAIClient("http://localhost:8080/v1"), "glm-flash-latest")
    result = engine.system_one(
        "A customer writes: I was charged twice for the same transfer on Monday.",
        {
@@ -118,7 +118,7 @@ cp .env.example .env         # proxy URL and Privatemode API key
 sh deploy.sh                 # docker compose on a host, behind your reverse proxy
 ```
 
-`./run.sh` expects the proxy from the quickstart on `localhost:8082`;
+`./run.sh` expects the proxy from the quickstart on `localhost:8080`;
 `docker compose` starts its own, reachable only by the app. The app is a
 showcase: it uses the single key from `.env` for every visitor, so put
 authentication or rate limiting in front of it if you expose it.
