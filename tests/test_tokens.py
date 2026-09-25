@@ -14,9 +14,9 @@ class FakeTokenizer:
         self.single, self.offset, self.requests = single, offset, 0
 
     def encode(self, text: str) -> list[int]:
-        if text == "answer:":
+        if text == "answer=":
             return PREFIX_IDS
-        index = int(text.removeprefix("answer:"))
+        index = int(text.removeprefix("answer="))
         if index < self.single:
             return [*PREFIX_IDS, self.offset + index]
         return [*PREFIX_IDS, 1, 2]
@@ -31,31 +31,31 @@ class FakeTokenizer:
 
 def test_stops_at_the_first_multi_token_index():
     oracle = TokenOracle(FakeTokenizer(single=12), "fake")
-    assert oracle.single_token_indexes("answer:", limit=50) == [100 + i for i in range(12)]
+    assert oracle.single_token_indexes("answer=", limit=50) == [100 + i for i in range(12)]
 
 
 def test_a_shorter_probe_does_not_cap_a_longer_one():
     oracle = TokenOracle(FakeTokenizer(single=12), "fake")
-    assert len(oracle.single_token_indexes("answer:", limit=3)) == 3
-    assert len(oracle.single_token_indexes("answer:", limit=10)) == 10
-    assert len(oracle.single_token_indexes("answer:", limit=50)) == 12
+    assert len(oracle.single_token_indexes("answer=", limit=3)) == 3
+    assert len(oracle.single_token_indexes("answer=", limit=10)) == 10
+    assert len(oracle.single_token_indexes("answer=", limit=50)) == 12
 
 
 def test_a_probe_is_reused_until_it_expires():
     server = FakeTokenizer()
     oracle = TokenOracle(server, "fake")
-    oracle.single_token_indexes("answer:", limit=20)
+    oracle.single_token_indexes("answer=", limit=20)
     requests = server.requests
-    oracle.single_token_indexes("answer:", limit=20)
+    oracle.single_token_indexes("answer=", limit=20)
     assert server.requests == requests
 
     # The alias moved to a model with another tokenizer: after max_age the
     # oracle has to see the new ids, not keep the old ones.
     server.offset = 500
     oracle.max_age = 0
-    assert oracle.single_token_indexes("answer:", limit=20)[0] == 500
+    assert oracle.single_token_indexes("answer=", limit=20)[0] == 500
 
 
 def test_no_single_token_index_is_an_error():
     with pytest.raises(ValueError):
-        TokenOracle(FakeTokenizer(single=0), "fake").single_token_indexes("answer:")
+        TokenOracle(FakeTokenizer(single=0), "fake").single_token_indexes("answer=")

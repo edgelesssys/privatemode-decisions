@@ -38,6 +38,10 @@ class ChoiceAnswer:
     choice: str
     probabilities: dict[str, float]
     confidence: float
+    #: Probability the model put on the option tokens before the mask, out of
+    #: its whole vocabulary. Low means the model wanted to say something
+    #: else. Not in TypeSafe's SDK; ``None`` where it isn't known.
+    option_mass: float | None = None
 
 
 @dataclass(frozen=True)

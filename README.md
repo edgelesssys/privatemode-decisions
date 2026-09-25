@@ -82,12 +82,14 @@ Full results and methodology are in
    )
    answer = result.answers["team"]
    print(answer.choice, answer.probabilities, answer.confidence)
-   # payments {'payments': 0.997, 'technical': 0.002, 'complaints': 0.0} 0.98
+   # payments {'payments': 0.957, 'technical': 0.033, 'complaints': 0.01} 0.82
    ```
 
 `confidence` ranges from 0 (probability spread evenly) to 1 (all of it on
 one option). It measures how sure the model is, not whether it's right,
-and works as a threshold for sending answers to human review. To include
+and works as a threshold for sending answers to human review; see
+[Calibration](#calibration) for how far the probabilities can be trusted.
+To include
 images, pass `images=` with paths, bytes, Pillow images or data URLs, and
 use a vision model such as `glm-flash-latest`.
 
@@ -99,7 +101,7 @@ get right.
 ## How it works
 
 The prompt numbers the options. The assistant's reply is prefilled with
-`answer:`, so the next token the model generates is the number of its
+`answer=`, so the next token the model generates is the number of its
 choice. The request restricts generation to those tokens and returns their
 log probabilities. The library turns them into probabilities that sum to 1
 across your options.
@@ -111,6 +113,31 @@ them for ten minutes per model. The cache expires because an alias such as
 
 Because the probabilities cover only your options, the model can't answer
 "none of these". Add it as an option if you need it.
+
+## Calibration
+
+Raw probabilities from one token are overconfident: on the benchmark,
+confidence exceeded accuracy by 15 points on average. So for GLM Flash the
+library softens them by default, with a temperature that depends on the
+number of options. That removes most of the gap without any labels; other
+models keep their raw probabilities until they're measured.
+
+- `SystemOne(..., temperature="sentiment")` uses the temperature for a
+  task family (`intent`, `legal`, `moderation`, `nli`, `qa`, `sentiment`,
+  `topic`), which fits better if you know what kind of task it is.
+  `temperature=1` gives the raw probabilities.
+- With a few hundred labelled answers from a random sample, `calibrate()`
+  fits your task and gives prediction sets with a coverage guarantee:
+
+  ```python
+  from decisions import calibrate
+
+  calibration = calibrate(answers, labels, coverage=0.9)
+  calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
+  ```
+
+The measurements, plots and method are in the benchmark's
+[calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).
 
 ## The web app
 

@@ -29,12 +29,15 @@ reference.
    followed by JSON with `state`, `question` and `options`, each option as
    `{"number": i, "label": ..., "description": ...}`, where `i` is its
    position. Keep the mapping from number back to option.
-2. **Prefill the answer.** Append an assistant message `answer:` and send
+2. **Prefill the answer.** Append an assistant message `answer=` and send
    `continue_final_message: true` and `add_generation_prompt: false`.
    Without both, the model opens a new turn and the next token is
-   formatting, not a number.
+   formatting, not a number. End the prefill with a character the model
+   follows with a digit: after `answer:` it wants a space first, and chat
+   templates strip a trailing one, so the read would be conditioned on an
+   unlikely token (check that most probability lands on the options).
 3. **Get the number token IDs from the serving tokenizer.** `i` qualifies
-   when `answer:` + `str(i)` tokenizes as the tokens of `answer:` plus
+   when `answer=` + `str(i)` tokenizes as the tokens of `answer=` plus
    exactly one more; that token is the ID. Tokenize the prefixed string,
    not bare digits, and stop at the first `i` that doesn't fit. Don't assume
    one digit per token: GLM-5.3-Flash has single tokens for 0 to 190. Use
@@ -55,6 +58,12 @@ reference.
    There is no "none of these" signal unless it's an option.
 8. **Report confidence as what it is.** `1 - entropy / log(n)` measures
    how peaked the distribution is, not whether the answer is right.
+9. **Calibrate before trusting the numbers.** Raw probabilities are
+   overconfident. Divide the log probabilities by a temperature (fitted
+   per model in `decisions/calibration.py`; it never changes the choice),
+   and use conformal sets from labelled data where a guarantee is needed.
+   Don't divide out a neutral-input prior: on the benchmark it made 24 of
+   28 datasets worse.
 
 ## Limits
 
