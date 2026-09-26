@@ -11,6 +11,7 @@ from decisions.calibration import (
     FAMILY_TEMPERATURES,
     default_temperature,
     fit_temperature,
+    fit_temperature_bias,
     peakedness,
     rescale,
     scale,
@@ -149,7 +150,9 @@ def test_per_class_cutoffs_cover_a_rare_class():
     answers, labels = sample(3000)
     fresh, truth = sample(6000)
     for per_class, low, high in ((False, 0.0, 0.85), (True, 0.87, 1.0)):
-        calibration = calibrate(answers, labels, coverage=0.9, per_class=per_class)
+        # A bias would shift probability towards the rare class by itself;
+        # this is about the cutoffs.
+        calibration = calibrate(answers, labels, coverage=0.9, per_class=per_class, bias=False)
         hits = [t in calibration.predict_set(a) for a, t in zip(fresh, truth) if t == "rare"]
         assert low <= sum(hits) / len(hits) <= high
 
@@ -191,3 +194,66 @@ def test_options_with_too_few_labels_are_always_included():
     for answer_ in answers[:20]:
         assert set(rare) <= set(calibration.predict_set(answer_))
     assert calibrate(answers, labels).always_included == ()
+
+
+def biased_sample(n: int, seed: int = 0):
+    """Calibrated answers, except that the model moves probability from
+    ``b`` to ``a``: log p(a) is raised by 1.5 before renormalizing."""
+    rng = random.Random(seed)
+    names = ["a", "b", "c"]
+    answers, labels = [], []
+    for _ in range(n):
+        logits = [rng.gauss(0, 1.5) for _ in names]
+        total = sum(math.exp(v) for v in logits)
+        true = {k: math.exp(v) / total for k, v in zip(names, logits)}
+        labels.append(rng.choices(names, weights=list(true.values()))[0])
+        skewed = {k: v * (math.exp(1.5) if k == "a" else 1.0) for k, v in true.items()}
+        total = sum(skewed.values())
+        answers.append(answer({k: v / total for k, v in skewed.items()}))
+    return answers, labels
+
+
+def test_bias_recovers_a_preferred_option():
+    answers, labels = biased_sample(4000)
+    t, bias = fit_temperature_bias(answers, labels)
+    assert t == pytest.approx(1.0, abs=0.1)
+    assert bias["a"] - bias["b"] == pytest.approx(-1.5, abs=0.2)
+    assert sum(bias.values()) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_bias_is_pulled_towards_zero_with_few_labels():
+    answers, labels = biased_sample(10, seed=3)
+    _, weak = fit_temperature_bias(answers, labels, strength=100.0)
+    _, free = fit_temperature_bias(answers, labels, strength=0.01)
+    assert max(map(abs, weak.values())) < max(map(abs, free.values()))
+
+
+def test_calibrate_with_bias_changes_answers_and_gains_accuracy():
+    answers, labels = biased_sample(1000, seed=1)
+    fresh, truth = biased_sample(4000, seed=2)
+    with_bias = calibrate(answers, labels)
+    alone = calibrate(answers, labels, bias=False)
+    assert with_bias.bias and not alone.bias
+    corrected = [with_bias.apply(a) for a in fresh]
+    assert any(c.choice != a.choice for c, a in zip(corrected, fresh))
+    accuracy = sum(c.choice == t for c, t in zip(corrected, truth)) / len(truth)
+    raw = sum(a.choice == t for a, t in zip(fresh, truth)) / len(truth)
+    assert accuracy > raw + 0.02
+    assert evaluate(fresh, truth, calibration=with_bias)["accuracy"] == pytest.approx(accuracy)
+    assert evaluate(fresh, truth, calibration=alone)["accuracy"] == pytest.approx(raw)
+
+
+def test_calibrate_with_bias_keeps_coverage_and_the_error_bound():
+    answers, labels = biased_sample(1000, seed=4)
+    fresh, truth = biased_sample(6000, seed=5)
+    calibration = calibrate(answers, labels, coverage=0.9, max_error=0.10)
+    report = evaluate(fresh, truth, calibration=calibration)
+    assert report["coverage"] == pytest.approx(0.9, abs=0.03)
+    assert 0 < report["automated"] and report["automated_error"] <= 0.10
+
+
+def test_measured_models_and_their_aliases_have_defaults():
+    for alias, model in (("kimi-latest", "kimi-k2.6"), ("glm-latest", "glm-5.3"),
+                         ("glm-flash-latest", "glm-5.3-flash")):
+        assert default_temperature(alias, 4) == default_temperature(model, 4) > 1
+    assert default_temperature("some-unmeasured-model", 4) == 1.0

@@ -117,22 +117,29 @@ Because the probabilities cover only your options, the model can't answer
 ## Calibration
 
 Raw probabilities from one token are overconfident: on the benchmark,
-confidence exceeded accuracy by 15 points on average. So for GLM Flash the
-library softens them by default, with a temperature that depends on the
-number of options. That removes most of the gap without any labels; other
-models keep their raw probabilities until they're measured.
+confidence exceeded accuracy by 15 points on average. So the library
+softens them by default, with a temperature that depends on the number of
+options, measured per model: GLM-5.3-Flash, Kimi K2.6 and GLM-5.3 (and
+their `-latest` aliases). That removes most of the gap without any labels;
+other models keep their raw probabilities until they're measured. GLM-5.3
+puts only about two thirds of its probability on the options after
+`answer=`, so its answers are less reliable than Flash's or Kimi's.
 
 - `SystemOne(..., temperature="sentiment")` uses the temperature for a
   task family (`intent`, `legal`, `moderation`, `nli`, `qa`, `sentiment`,
   `topic`), which fits better if you know what kind of task it is.
   `temperature=1` gives the raw probabilities.
 - With labelled answers from a random sample of your inputs, `calibrate()`
-  fits your task and gives two guarantees:
+  fits your task: a temperature and a bias per option, which corrects a
+  model that favours some options and so changes answers (+2.0 points of
+  accuracy from 100 labels on the benchmark, +1.0 from 20, +3.0 from 500).
+  It also gives two guarantees:
 
   ```python
   from decisions import calibrate
 
   calibration = calibrate(answers, labels, coverage=0.9, max_error=0.05)
+  calibration.apply(new_answer).choice  # the corrected answer: use this one
   calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
   calibration.automate(new_answer)      # True: act on it; errors among these stay at most 5%
   ```
@@ -143,11 +150,37 @@ models keep their raw probabilities until they're measured.
   `automate` keeps the error among automated answers at most 5% with
   90% confidence. A few hundred labels make both reliable, and a guarantee
   costs automation: on the benchmark, a 5% error bound let about a fifth of
-  answers through, 10% about two fifths. Label a random sample, not only
-  escalated cases.
+  answers through, 10% about a third. `bias=False` fits the temperature
+  alone, which never changes an answer and automates a little more (27%
+  instead of 23% at a 10% bound with 100 labels). Label a random sample,
+  not only escalated cases.
 - `evaluate(answers, labels, calibration=...)` reports accuracy, ECE,
   coverage and the error among automated answers, for a fresh audit sample:
   refit with `calibrate()` when they drift.
+  [examples/audit_loop.py](examples/audit_loop.py) is such a loop.
+- `SystemOne(permutations=k)` asks in k option orders and averages. It keeps
+  the one-order default temperature, which measured as good as any other
+  choice without labels, and it didn't raise accuracy on the benchmark.
+
+**Which guarantee holds when.** The prediction sets cover the right option
+at the stated rate *on average over new inputs drawn like the labelled
+ones* (exchangeability); with `per_class=True`, for each option separately.
+The error bound on automated answers holds with probability 90% over the
+choice of labels, under the same assumption. Fitting the correction on the
+same labels as the cutoffs is tested on the benchmark, not proven: for a
+temperature alone at most 2.1% of samples broke the bound (10% allowed); with
+a bias, cutoffs and threshold are set out-of-fold, and at most 1.3% did.
+Labels collected only from escalated or disputed cases break all of it.
+
+**Why calibration happens in the client.** The library receives the raw log
+probabilities and calibrates on your machine. You refit the temperature,
+bias, cutoffs and threshold on your own labels, and the labels never leave
+your infrastructure, which matters on a confidential-computing service.
+Services that return rounded or already-transformed probabilities only
+allow calibration stacked on top of their own transform: Jev rounds to 0.01
+and prices the right answer at exactly 0 in 4.3% of the benchmark's
+examples, so a temperature can't even be fitted without first patching the
+zeros.
 
 The measurements, plots and method are in the benchmark's
 [calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).

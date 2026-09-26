@@ -62,6 +62,10 @@ reference.
    overconfident. Divide the log probabilities by a temperature (fitted
    per model in `decisions/calibration.py`; it never changes the choice),
    and use conformal sets from labelled data where a guarantee is needed.
+   With labels, also fit a bias per option (it changes answers; +2 points
+   from 100 labels), and then set the cutoffs and thresholds on
+   out-of-fold probabilities: on the labels the bias was fitted to, the
+   error bound broke.
    Don't divide out a neutral-input prior: on the benchmark it made 24 of
    28 datasets worse. For an error bound on automated answers, test
    thresholds with Learn then Test; the threshold where the observed error
@@ -69,6 +73,10 @@ reference.
 
 ## Limits
 
+- The prefill is tuned for GLM-5.3-Flash and fits Kimi K2.6 (all
+  probability on the options). GLM-5.3 wants a space after `answer=` about
+  half the time (option mass about 0.64); check the option mass before
+  adding a model.
 - Options are capped by the model's single-token numbers (191 on
   GLM-5.3-Flash); `system_one` raises `ValueError` beyond that.
 - Privatemode reports at most 128 IDs per response and rejects a longer

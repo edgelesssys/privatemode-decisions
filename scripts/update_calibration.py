@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 from pathlib import Path
 
 TARGET = Path(__file__).resolve().parent.parent / "decisions" / "calibration.py"
@@ -33,7 +34,14 @@ def main() -> None:
                for node in ast.parse(text[start:end]).body
                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
     formulas, families = dict(current["FORMULAS"]), dict(current["FAMILY_TEMPERATURES"])
+    aliases = dict(current.get("ALIASES", {}))
+    # One "# source (model): ..." line per model.
+    sources = dict(re.findall(r"^# source \((.+?)\): (.*)$", text[start:end], re.M))
     model = new["model"]
+    sources[model] = new["source"]
+    if new.get("alias"):
+        # The name the run asked for, when the endpoint answered with another.
+        aliases[new["alias"]] = model
     formulas[model] = (round(new["formula"][0], 3), round(new["formula"][1], 3))
     families[model] = {f: round(t, 2) for f, t in sorted(new["family"].items())}
 
@@ -43,9 +51,10 @@ def main() -> None:
         family_lines += f'    "{m}": {{\n'
         family_lines += "".join(f'        "{f}": {t},\n' for f, t in sorted(temps.items()))
         family_lines += "    },\n"
+    alias_lines = "".join(f'    "{a}": "{m}",\n' for a, m in sorted(aliases.items()))
+    source_lines = "".join(f"# source ({m}): {src}\n" for m, src in sorted(sources.items()))
     block = f"""{BEGIN}; don't edit by hand ---------
-# source: {new['source']}
-
+{source_lines}
 #: Per model, ``log T = a + b * log(options)``, fitted on the benchmark's text
 #: datasets with every dataset weighted equally. Harder, fewer-option tasks
 #: need more softening. Only measured models are listed; others keep their
@@ -58,6 +67,10 @@ FORMULAS: dict[str, tuple[float, float]] = {{
 #: say what kind of task it is.
 FAMILY_TEMPERATURES: dict[str, dict[str, float]] = {{
 {family_lines}}}
+
+#: Other names for a measured model, such as the serving alias.
+ALIASES: dict[str, str] = {{
+{alias_lines}}}
 {END} ------------------------------------------------------------
 """
     TARGET.write_text(text[:start] + block + text[end:])
