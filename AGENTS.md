@@ -118,6 +118,11 @@ cp .env.example .env        # proxy URL and Privatemode API key
 - `decisions/` needs only the standard library (Pillow optionally, for
   resizing images). Keep it that way: no torch, no transformers, no HTTP
   client packages.
+- The default temperatures in `decisions/calibration.py` are generated:
+  run the benchmark's `bench.calibrate_report`, then
+  `python scripts/update_calibration.py <its constants.json>`. Don't edit
+  them by hand. The benchmark's parity tests check that its numpy
+  calibration code matches this library's.
 - `SystemOne`, `system_one()` and the types in `decisions/types.py` mirror
   TypeSafe's SDK so Jev code ports over. Don't rename them.
 - The tests need no model. A change to the request or decoding needs a

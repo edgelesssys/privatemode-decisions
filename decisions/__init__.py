@@ -6,7 +6,7 @@ cannot load, download a tokenizer for, or reach with anything but an HTTP
 API.
 """
 
-from .calibration import Calibration, calibrate
+from .calibration import Calibration, calibrate, evaluate
 from .client import APIError, OpenAIClient
 from .inference import PREFIX, SystemOne
 from .tokens import TokenOracle
@@ -24,4 +24,5 @@ __all__ = [
            "TokenOracle",
            "Usage",
            "calibrate",
+           "evaluate",
 ]

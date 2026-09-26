@@ -145,6 +145,9 @@ models keep their raw probabilities until they're measured.
   costs automation: on the benchmark, a 5% error bound let about a fifth of
   answers through, 10% about two fifths. Label a random sample, not only
   escalated cases.
+- `evaluate(answers, labels, calibration=...)` reports accuracy, ECE,
+  coverage and the error among automated answers, for a fresh audit sample:
+  refit with `calibrate()` when they drift.
 
 The measurements, plots and method are in the benchmark's
 [calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).

@@ -6,7 +6,7 @@ import random
 import pytest
 from test_inference import make_engine, question
 
-from decisions import SystemOne, calibrate
+from decisions import SystemOne, calibrate, evaluate
 from decisions.calibration import (
     FAMILY_TEMPERATURES,
     default_temperature,
@@ -162,6 +162,25 @@ def test_few_labels_are_pulled_towards_no_change():
     many, many_labels = sharpened_sample(4000, temperature=2.0, seed=9)
     assert fit_temperature(many, many_labels) == pytest.approx(
         fit_temperature(many, many_labels, shrinkage=0), rel=0.01)
+
+
+def test_evaluate_reports_calibration_sets_and_automation():
+    answers, labels = sharpened_sample(3000, temperature=2.0, seed=10)
+    raw = evaluate(answers, labels)
+    assert raw["overconfidence"] > 0.05 and raw["ece"] > 0.05
+    calibration = calibrate(answers[:1500], labels[:1500], coverage=0.9, max_error=0.1)
+    fixed = evaluate(answers[1500:], labels[1500:], calibration=calibration)
+    assert fixed["ece"] < raw["ece"] / 2
+    assert fixed["coverage"] == pytest.approx(0.9, abs=0.03)
+    assert fixed["automated_error"] <= 0.1
+    assert 0 < fixed["automated"] < 1
+    assert set(raw) == {"accuracy", "confidence", "overconfidence", "ece"}
+
+
+def test_aliases_share_their_model_temperature():
+    assert default_temperature("glm-flash-latest", 7) == default_temperature("glm-5.3-flash", 7) > 1
+
+
 def test_options_with_too_few_labels_are_always_included():
     answers, labels = sharpened_sample(60, temperature=1.0, seed=11)
     counts = {name: labels.count(name) for name in "abcd"}
