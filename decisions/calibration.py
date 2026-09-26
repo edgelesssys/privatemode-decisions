@@ -101,11 +101,22 @@ def _nll(logs: Sequence[tuple[list[float], int]], temperature: float) -> float:
     return total / len(logs)
 
 
-def fit_temperature(answers: Sequence[ChoiceAnswer], labels: Sequence[str]) -> float:
-    """The temperature minimizing negative log-likelihood on labelled answers.
+#: How strongly :func:`fit_temperature` pulls towards the temperature the
+#: answers already have, in pseudo-examples. On the benchmark it improved a
+#: fit from 20 labels by an eighth and changed nothing from 100 labels on.
+SHRINKAGE = 5.0
 
-    NLL is convex in ``1 / T``, so a golden-section search on ``log T`` over
-    [0.05, 50] finds it.
+
+def fit_temperature(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
+                    shrinkage: float = SHRINKAGE) -> float:
+    """The temperature minimizing negative log-likelihood on labelled answers,
+    relative to the probabilities they already have.
+
+    With few labels the fit is noisy, so ``shrinkage / n · (log T)²`` pulls
+    it towards 1, keeping the answers as they are (for :class:`SystemOne`'s
+    answers, the benchmark's default). NLL has a single minimum in ``T`` and
+    the pull is convex, so a golden-section search on ``log T`` over
+    [0.05, 50] finds the minimum.
     """
     logs = []
     for answer, label in zip(answers, labels, strict=True):
@@ -116,34 +127,46 @@ def fit_temperature(answers: Sequence[ChoiceAnswer], labels: Sequence[str]) -> f
                      names.index(label)))
     if not logs:
         raise ValueError("no labelled answers to fit on")
+    def loss(log_t: float) -> float:
+        return _nll(logs, math.exp(log_t)) + shrinkage / len(logs) * log_t ** 2
+
     a, b = math.log(0.05), math.log(50.0)
     g = (math.sqrt(5) - 1) / 2
     c, d = b - g * (b - a), a + g * (b - a)
-    fc, fd = _nll(logs, math.exp(c)), _nll(logs, math.exp(d))
+    fc, fd = loss(c), loss(d)
     for _ in range(60):
         if fc < fd:
             b, d, fd = d, c, fc
             c = b - g * (b - a)
-            fc = _nll(logs, math.exp(c))
+            fc = loss(c)
         else:
             a, c, fc = c, d, fd
             d = a + g * (b - a)
-            fd = _nll(logs, math.exp(d))
+            fd = loss(d)
     return math.exp((a + b) / 2)
 
 
 @dataclass(frozen=True)
 class Calibration:
-    """A per-task temperature and conformal cutoff, from :func:`calibrate`.
+    """A task's temperature, conformal cutoffs and automation threshold, from
+    :func:`calibrate`.
 
-    ``cutoff`` applies to ``1 - p`` after the temperature: an option is in
-    the prediction set when its probability is at least ``1 - cutoff``.
+    ``cutoffs`` apply to ``1 - p`` after the temperature: an option is in the
+    prediction set when its probability is at least ``1 - cutoff``. There is
+    one cutoff for all options, or one per option with ``per_class=True``.
+    ``threshold`` is the confidence above which :meth:`automate` says yes,
+    ``inf`` if nothing could be certified or no ``max_error`` was asked for.
+    ``always_included`` lists the options that had too few labels for a
+    cutoff of their own (``per_class=True``): they are in every set.
     """
 
     temperature: float
-    cutoff: float
+    cutoffs: Mapping[str, float]
     coverage: float
     examples: int
+    threshold: float = math.inf
+    max_error: float | None = None
+    always_included: tuple[str, ...] = ()
 
     def apply(self, answer: ChoiceAnswer) -> ChoiceAnswer:
         """The answer with this task's temperature applied."""
@@ -154,30 +177,123 @@ class Calibration:
         ``coverage``, most likely first. One option means it can be
         automated at that level; several mean a person should choose.
 
-        Never empty: where no option clears the cutoff, the most likely one
+        Never empty: where no option clears its cutoff, the most likely one
         is returned, which only makes the coverage higher."""
         probabilities = scale(answer.probabilities, self.temperature)
         ranked = sorted(probabilities, key=probabilities.get, reverse=True)
-        return [name for name in ranked if 1 - probabilities[name] <= self.cutoff] or ranked[:1]
+        default = self.cutoffs.get("*", 1.0)
+        chosen = [name for name in ranked
+                  if 1 - probabilities[name] <= self.cutoffs.get(name, default)]
+        return chosen or ranked[:1]
+
+    def automate(self, answer: ChoiceAnswer) -> bool:
+        """Whether to act on the answer without a person: its confidence is
+        above the threshold that keeps the error among automated answers at
+        most ``max_error``, with 90% probability over the labelled sample."""
+        return max(scale(answer.probabilities, self.temperature).values()) >= self.threshold
+
+
+def _binomial_cdf(k: int, n: int, p: float) -> float:
+    """P(X <= k) for X ~ Binomial(n, p)."""
+    if k >= n:
+        return 1.0
+    logs = [math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1)
+            + i * math.log(p) + (n - i) * math.log1p(-p) for i in range(k + 1)]
+    top = max(logs)
+    return min(1.0, math.exp(top) * math.fsum(math.exp(v - top) for v in logs))
+
+
+def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
+                          max_error: float, delta: float, step: float = 0.05) -> float:
+    """Learn then Test, fixed sequence over a grid: see :func:`calibrate`."""
+    pairs = sorted(zip(confidences, right, strict=True), key=lambda cr: -cr[0])
+    conf = [cf for cf, _ in pairs]
+    errors, running = [], 0
+    for _, ok in pairs:
+        running += not ok
+        errors.append(running)
+    smallest = math.ceil(math.log(delta) / math.log1p(-max_error))
+    chosen = math.inf
+    levels = round(1 / step)
+    for level in range(1, levels + 1):
+        n = math.ceil(len(conf) * level / levels)
+        while n < len(conf) and conf[n] == conf[n - 1]:
+            n += 1   # a threshold can't split a run of equal confidences
+        if n < smallest:
+            continue
+        if _binomial_cdf(errors[n - 1], n, max_error) > delta:
+            break
+        chosen = conf[n - 1]
+    return chosen
+
+
+def _cutoff(scores: list[float], coverage: float) -> float:
+    """The split-conformal quantile, or 1 (always include) with too few scores."""
+    scores = sorted(scores)
+    rank = math.ceil((len(scores) + 1) * coverage)
+    return 1.0 if rank > len(scores) else scores[rank - 1]
 
 
 def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
-              coverage: float = 0.9) -> Calibration:
-    """Fit a temperature and a conformal cutoff on labelled answers.
+              coverage: float = 0.9, per_class: bool = False,
+              max_error: float | None = None, delta: float = 0.1) -> Calibration:
+    """Fit a temperature, conformal cutoffs and an automation threshold on
+    labelled answers.
 
     ``answers`` are what :meth:`~decisions.SystemOne.system_one` returned for
     one question on a random sample of inputs, ``labels`` the right option
-    for each. A few hundred make the coverage reliable: on the benchmark, a
-    90% target landed between 85% and 95% with 100 labels and between 87%
-    and 92% with 500 (5th to 95th percentile). The guarantee needs new inputs
-    to come from the same distribution as the labelled ones.
+    for each. The guarantees need new inputs to come from the same
+    distribution as the labelled ones.
+
+    * **Prediction sets** contain the right option with probability
+      ``coverage``, on average over new inputs. A few hundred labels make
+      that reliable: on the benchmark, a 90% target landed between 85% and
+      95% with 100 labels and between 87% and 92% with 500 (5th to 95th
+      percentile). With ``per_class=True`` it holds for every option
+      separately, which matters when one is rare: on the benchmark's
+      imbalanced tasks the rare class was covered only 70–76% of the time
+      with one cutoff, and 97% with one per class, at the price of larger sets.
+      A cutoff per option needs at least ``coverage / (1 - coverage)`` labels
+      of that option, 9 at 90%: an option with fewer is put in every set
+      (:attr:`Calibration.always_included`), which makes sets larger. With
+      100 labels and an 8% class, that is likely.
+    * **Automation** (``max_error``, e.g. 0.05): :meth:`Calibration.automate`
+      says yes above a confidence threshold chosen so that the error among
+      automated answers is at most ``max_error`` with probability
+      ``1 - delta``. This is Learn then Test: thresholds that automate 5%,
+      10%, ... of the labelled answers are tested in order with an exact
+      binomial test, stopping at the first that can't be certified. Picking
+      the threshold where the *observed* error equals ``max_error`` instead
+      broke its promise on about 40% of the benchmark's samples.
+
+    The temperature is fitted on the same labels as the cutoffs and the
+    threshold. Strictly, that uses them twice; on the benchmark both
+    guarantees still held (at most 1.6% of samples over the error bound,
+    coverage 0.898–0.908), while splitting the labels between the two steps
+    cost up to half the automation.
     """
     if not 0 < coverage < 1:
         raise ValueError("coverage must be between 0 and 1")
+    if max_error is not None and not 0 < max_error < 1:
+        raise ValueError("max_error must be between 0 and 1")
     temperature = fit_temperature(answers, labels)
-    scores = sorted(1 - scale(a.probabilities, temperature)[label]
-                    for a, label in zip(answers, labels, strict=True))
-    rank = math.ceil((len(scores) + 1) * coverage)
-    cutoff = 1.0 if rank > len(scores) else scores[rank - 1]
-    return Calibration(temperature=temperature, cutoff=cutoff, coverage=coverage,
-                       examples=len(scores))
+    scaled = [scale(a.probabilities, temperature) for a in answers]
+    if per_class:
+        by_label: dict[str, list[float]] = {}
+        for p, label in zip(scaled, labels, strict=True):
+            by_label.setdefault(label, []).append(1 - p[label])
+        # An option with too few labels can't be certified: always include it.
+        cutoffs = {name: _cutoff(by_label.get(name, []), coverage) for name in scaled[0]}
+        always = tuple(name for name, cutoff in cutoffs.items() if cutoff >= 1.0)
+    else:
+        cutoffs = {"*": _cutoff([1 - p[label] for p, label in zip(scaled, labels, strict=True)],
+                                coverage)}
+    threshold = math.inf
+    if max_error is not None:
+        threshold = _automation_threshold(
+            [max(p.values()) for p in scaled],
+            [max(p, key=p.get) == label for p, label in zip(scaled, labels, strict=True)],
+            max_error, delta)
+    return Calibration(temperature=temperature, cutoffs=cutoffs, coverage=coverage,
+                       examples=len(scaled), threshold=threshold, max_error=max_error,
+                       always_included=always if per_class else ())

@@ -126,15 +126,25 @@ models keep their raw probabilities until they're measured.
   task family (`intent`, `legal`, `moderation`, `nli`, `qa`, `sentiment`,
   `topic`), which fits better if you know what kind of task it is.
   `temperature=1` gives the raw probabilities.
-- With a few hundred labelled answers from a random sample, `calibrate()`
-  fits your task and gives prediction sets with a coverage guarantee:
+- With labelled answers from a random sample of your inputs, `calibrate()`
+  fits your task and gives two guarantees:
 
   ```python
   from decisions import calibrate
 
-  calibration = calibrate(answers, labels, coverage=0.9)
+  calibration = calibrate(answers, labels, coverage=0.9, max_error=0.05)
   calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
+  calibration.automate(new_answer)      # True: act on it; errors among these stay at most 5%
   ```
+
+  `predict_set` contains the right option 90% of the time; with
+  `per_class=True` that holds for every option, which matters when one is
+  rare; an option with fewer than 9 labels (at 90%) is then in every set.
+  `automate` keeps the error among automated answers at most 5% with
+  90% confidence. A few hundred labels make both reliable, and a guarantee
+  costs automation: on the benchmark, a 5% error bound let about a fifth of
+  answers through, 10% about two fifths. Label a random sample, not only
+  escalated cases.
 
 The measurements, plots and method are in the benchmark's
 [calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).

@@ -119,3 +119,56 @@ def test_a_prediction_set_is_never_empty():
     calibration = calibrate(answers, labels, coverage=0.5)
     flat = answer({"a": 0.26, "b": 0.25, "c": 0.25, "d": 0.24})
     assert calibration.predict_set(flat)[:1] == ["a"]
+
+
+def test_automation_keeps_its_error_promise():
+    answers, labels = sharpened_sample(2000, temperature=1.0, seed=5)
+    calibration = calibrate(answers, labels, max_error=0.10)
+    assert calibration.threshold < math.inf
+    fresh, truth = sharpened_sample(8000, temperature=1.0, seed=6)
+    automated = [(a, t) for a, t in zip(fresh, truth) if calibration.automate(a)]
+    assert automated
+    errors = sum(a.choice != t for a, t in automated) / len(automated)
+    assert errors <= 0.10
+    assert not calibrate(answers, labels).automate(fresh[0])   # no max_error, no automation
+
+
+def test_per_class_cutoffs_cover_a_rare_class():
+    rng = random.Random(7)
+
+    def sample(n):
+        answers, labels = [], []
+        for _ in range(n):
+            rare = rng.random() < 0.1
+            # The rare class looks like the common one most of the time.
+            p = rng.uniform(0.3, 0.6) if rare else rng.uniform(0.0, 0.3)
+            answers.append(answer({"rare": p, "common": 1 - p}))
+            labels.append("rare" if rare else "common")
+        return answers, labels
+
+    answers, labels = sample(3000)
+    fresh, truth = sample(6000)
+    for per_class, low, high in ((False, 0.0, 0.85), (True, 0.87, 1.0)):
+        calibration = calibrate(answers, labels, coverage=0.9, per_class=per_class)
+        hits = [t in calibration.predict_set(a) for a, t in zip(fresh, truth) if t == "rare"]
+        assert low <= sum(hits) / len(hits) <= high
+
+
+def test_few_labels_are_pulled_towards_no_change():
+    answers, labels = sharpened_sample(15, temperature=2.0, seed=8)
+    free = fit_temperature(answers, labels, shrinkage=0)
+    pulled = fit_temperature(answers, labels)
+    assert abs(math.log(pulled)) < abs(math.log(free))
+    many, many_labels = sharpened_sample(4000, temperature=2.0, seed=9)
+    assert fit_temperature(many, many_labels) == pytest.approx(
+        fit_temperature(many, many_labels, shrinkage=0), rel=0.01)
+def test_options_with_too_few_labels_are_always_included():
+    answers, labels = sharpened_sample(60, temperature=1.0, seed=11)
+    counts = {name: labels.count(name) for name in "abcd"}
+    calibration = calibrate(answers, labels, coverage=0.9, per_class=True)
+    for name, count in counts.items():
+        assert (name in calibration.always_included) == (count < 9)
+    rare = [name for name, count in counts.items() if count < 9]
+    for answer_ in answers[:20]:
+        assert set(rare) <= set(calibration.predict_set(answer_))
+    assert calibrate(answers, labels).always_included == ()
