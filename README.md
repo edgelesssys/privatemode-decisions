@@ -177,7 +177,7 @@ ones* (exchangeability); with `per_class=True`, for each option separately.
 The error bound on automated answers holds with probability 90% over the
 choice of labels, under the same assumption. Fitting the correction on the
 same labels as the cutoffs is tested on the benchmark, not proven: for a
-temperature alone at most 2.1% of samples broke the bound (10% allowed); with
+temperature alone at most 1.1% of samples broke the bound (10% allowed); with
 a bias, cutoffs and threshold are set out-of-fold, and at most 1.3% did.
 Labels collected only from escalated or disputed cases break all of it.
 

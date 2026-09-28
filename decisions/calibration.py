@@ -498,10 +498,10 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     probabilities: each label's answer corrected by a fit on the other
     :data:`FOLDS` folds. Set on the answers the bias was fitted to, they
     trusted it too much, and at 500 labels the error bound broke on 2 of 23
-    benchmark datasets; out-of-fold, at most 1.4% of samples were over it
-    and 90% sets covered 90.3–90.9%. A temperature alone is one number and
-    uses the same labels for everything, which held (at most 2.1% of samples
-    over the bound, coverage 89.9–90.3%) and automates a little more.
+    benchmark datasets; out-of-fold, at most 1.3% of samples were over it
+    and 90% sets covered 90.3–91.3%. A temperature alone is one number and
+    uses the same labels for everything, which held (at most 1.1% of samples
+    over the bound, coverage 89.8–90.6%) and automates a little more.
     """
     if not 0 < coverage < 1:
         raise ValueError("coverage must be between 0 and 1")
