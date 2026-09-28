@@ -35,11 +35,16 @@ and up to 1,000 examples each.
 | Normalized accuracy | 0.585 | 0.574 | 0.422 |
 | Median latency, from Germany | 152 ms | 251 ms | runs locally |
 | EUR per 1,000 decisions | 0.062 | 0.016 | runs locally |
+| Calibration error without labels (excess ECE) | 0.032 | 0.080 | not measured |
 
 Normalized accuracy is 0 for always guessing a dataset's most common label
 and 1 for getting everything right, averaged across datasets. On the 28
 datasets both can answer, Privatemode Decisions and Jev are statistically
 indistinguishable. Jev can't read images, and Laya can't fit 151 options.
+The calibration error is what remains after the library's default
+temperature, beyond what sampling alone produces (0 is as calibrated as the
+test sets can show); Jev's is for its probabilities as returned, and 0.042
+if it gets a default temperature fitted the same way.
 Full results and methodology are in
 [privatemode-decisions-benchmark](https://github.com/edgelesssys/privatemode-decisions-benchmark).
 
@@ -84,6 +89,10 @@ Full results and methodology are in
    print(answer.choice, answer.probabilities, answer.confidence)
    # payments {'payments': 0.957, 'technical': 0.033, 'complaints': 0.01} 0.82
    ```
+
+The probabilities are calibrated by default: for the models we measured,
+the library divides the log probabilities by a pre-configured temperature
+before reporting them (see [Calibration](#calibration)).
 
 `confidence` ranges from 0 (probability spread evenly) to 1 (all of it on
 one option). It measures how sure the model is, not whether it's right,
@@ -181,6 +190,28 @@ allow calibration stacked on top of their own transform: Jev rounds to 0.01
 and prices the right answer at exactly 0 in 4.3% of the benchmark's
 examples, so a temperature can't even be fitted without first patching the
 zeros.
+
+**What we tried and dropped.** Each was measured on the benchmark and
+didn't beat what the library does:
+
+- Dividing out the answer to a neutral input (contextual calibration): made
+  24 of 28 datasets worse, up to 16 points of accuracy; batch calibration
+  on unlabelled traffic cost 0.5 points on average. The bias they remove is
+  mostly real knowledge or the real class balance.
+- Averaging option orders (`permutations`) or a position prior (PriDe):
+  −0.3 points, not significant, for 4× the requests. Re-reading only
+  uncertain answers in more orders didn't help either, and a temperature
+  fitted per number of orders did worse than the one-order default.
+- Isotonic regression instead of a temperature: needs about 500 labels to
+  catch up. Predicting a task's temperature without labels (Thermometer
+  and similar): at most the gap from 0.032 to 0.006 excess ECE, half of
+  which 20 labels already close.
+- Clustered conformal sets for many options with few labels: no better than
+  one cutoff at a few labels per class.
+- Correcting answers by known class rates: needs rates as accurate as 100
+  labels would give, and hurts when they are off.
+- Probability left off the options (option mass): about 99% sits on the
+  options, right or wrong, so it says nothing about errors.
 
 The measurements, plots and method are in the benchmark's
 [calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).
