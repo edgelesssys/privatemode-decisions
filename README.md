@@ -43,7 +43,7 @@ datasets both can answer, Privatemode Decisions and Jev are statistically
 indistinguishable. Jev can't read images, and Laya can't fit 151 options.
 The calibration error is what remains after the library's default
 temperature, beyond what sampling alone produces (0 is as calibrated as the
-test sets can show); Jev's is for its probabilities as returned, and 0.042
+test sets can show); Jev's is for its probabilities as returned, and 0.040
 if it gets a default temperature fitted the same way.
 Full results and methodology are in
 [privatemode-decisions-benchmark](https://github.com/edgelesssys/privatemode-decisions-benchmark).
