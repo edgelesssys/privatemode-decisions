@@ -36,9 +36,9 @@ from .types import ChoiceAnswer
 # source (kimi-k2.6): privatemode-decisions-benchmark, results/calibration/part-3/kimi-k2.6/constants.json (run 20260926T102643Z)
 
 #: Per model, ``log T = a + b * log(options)``, fitted on the benchmark's text
-#: datasets with every dataset weighted equally. Harder, fewer-option tasks
-#: need more softening. Only measured models are listed; others keep their
-#: raw probabilities.
+#: datasets with every dataset weighted equally (for some models, harder
+#: tasks with fewer options need more softening; for others b is about 0).
+#: Only measured models are listed; others keep their raw probabilities.
 FORMULAS: dict[str, tuple[float, float]] = {
     "glm-5.3": (0.712, -0.008),
     "glm-5.3-flash": (0.962, -0.076),

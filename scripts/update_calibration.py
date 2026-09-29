@@ -1,11 +1,13 @@
 """Update the library's default temperatures from a benchmark calibration run.
 
-    python scripts/update_calibration.py path/to/constants.json
+    python scripts/update_calibration.py path/to/constants.json [--target path]
 
-``constants.json`` is written by the benchmark's ``bench.calibrate_report``
-(``results/calibration/part-1/constants.json``). This rewrites the generated
-block in ``decisions/calibration.py`` for that model and keeps the other
-models, so the shipped numbers can't drift from the report that measured them.
+``constants.json`` is written by the benchmark's ``bench.calibrate_report``,
+one per model (``results/calibration/part-1/constants.json`` for
+GLM-5.3-Flash, ``part-3/<model>/constants.json`` for the others). This
+rewrites the generated block in ``decisions/calibration.py`` (or
+``--target``) for that model and keeps the other models, so the shipped
+numbers can't drift from the reports that measured them.
 """
 
 from __future__ import annotations
@@ -24,10 +26,12 @@ END = "# --- end generated"
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("constants")
+    parser.add_argument("--target", type=Path, default=TARGET)
     args = parser.parse_args()
     new = json.loads(Path(args.constants).read_text())
+    target = args.target
 
-    text = TARGET.read_text()
+    text = target.read_text()
     start, end = text.index(BEGIN), text.index(END)
     end = text.index("\n", end) + 1
     current = {node.target.id: ast.literal_eval(node.value)
@@ -56,9 +60,9 @@ def main() -> None:
     block = f"""{BEGIN}; don't edit by hand ---------
 {source_lines}
 #: Per model, ``log T = a + b * log(options)``, fitted on the benchmark's text
-#: datasets with every dataset weighted equally. Harder, fewer-option tasks
-#: need more softening. Only measured models are listed; others keep their
-#: raw probabilities.
+#: datasets with every dataset weighted equally (for some models, harder
+#: tasks with fewer options need more softening; for others b is about 0).
+#: Only measured models are listed; others keep their raw probabilities.
 FORMULAS: dict[str, tuple[float, float]] = {{
 {formula_lines}}}
 
@@ -73,7 +77,7 @@ ALIASES: dict[str, str] = {{
 {alias_lines}}}
 {END} ------------------------------------------------------------
 """
-    TARGET.write_text(text[:start] + block + text[end:])
+    target.write_text(text[:start] + block + text[end:])
     print(f"{model}: formula {formulas[model]}, families {families[model]}")
 
 
