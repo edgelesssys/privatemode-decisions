@@ -169,3 +169,24 @@ def test_answers_carry_the_temperature_they_were_reported_at():
     assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 3.0
     engine, _ = make_engine()                      # an unmeasured model stays raw
     assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 1.0
+
+
+def test_the_default_temperature_follows_the_model_that_answered():
+    from decisions.calibration import default_temperature
+
+    def serving(model):
+        server = FakeServer()
+        original = server.post
+
+        def post(path, payload):
+            body, elapsed = original(path, payload)
+            return dict(body, model=model), elapsed
+        server.post = post
+        engine = SystemOne(server, "glm-flash-latest")
+        engine.oracle._indexes[PREFIX] = {"ids": INDEX_IDS, "exhausted": True}
+        return engine.system_one("state", {"q": question(4)}).answers["q"].temperature
+
+    flash = default_temperature("glm-5.3-flash", 4)
+    assert serving("glm-5.3-flash") == pytest.approx(flash)          # the alias as measured
+    assert serving("kimi-k2.6") == pytest.approx(default_temperature("kimi-k2.6", 4))
+    assert serving("some-new-model") == 1.0                         # moved to an unmeasured model

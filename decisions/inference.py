@@ -29,7 +29,7 @@ from pathlib import PurePath
 from time import perf_counter
 from typing import Any
 
-from .calibration import default_temperature, rescale
+from .calibration import ALIASES, FORMULAS, default_temperature, rescale
 from .client import OpenAIClient
 from .images import to_data_url
 from .tokens import MAX_AGE, TokenOracle
@@ -409,8 +409,12 @@ class SystemOne:
         votes: dict[str, list[dict[str, float]]] = {key: [] for key in keys}
         for (key, question, allowed), question_reads in zip(units, reads):
             votes[key].append(self._answer(question_reads, question, allowed))
+        # The model that answered, as the server reports it: an alias such
+        # as glm-flash-latest can move, and the default temperature belongs
+        # to the model, not the name it was asked by.
+        served = next((body.get("model") for _, _, body, _ in results if body.get("model")), None)
         answers = {key: rescale(self._merge(prepared[key], votes[key]),
-                                self._temperature(len(prepared[key].criteria)))
+                                self._temperature(len(prepared[key].criteria), served))
                    for key in keys}
         return SystemOneResponse(
             model=self.model,
@@ -422,10 +426,19 @@ class SystemOne:
                      "permutations": max(orders.values()) if orders else 1},
         )
 
-    def _temperature(self, options: int) -> float:
-        if self.temperature is None or isinstance(self.temperature, str):
-            return default_temperature(self.model, options, self.temperature)
-        return float(self.temperature)
+    def _temperature(self, options: int, served: str | None = None) -> float:
+        """The temperature to report answers at: a number as given, else the
+        default of the model that answered (``served``, else the name asked
+        for). A model without measured defaults stays raw, even if the name
+        it was asked by had them: the alias has moved."""
+        if self.temperature is not None and not isinstance(self.temperature, str):
+            return float(self.temperature)
+        model = self.model
+        if served and ALIASES.get(served, served) != ALIASES.get(self.model, self.model):
+            model = served
+            if ALIASES.get(model, model) not in FORMULAS:
+                return 1.0
+        return default_temperature(model, options, self.temperature)
 
     @staticmethod
     def _merge(question: Choice, votes: list[dict[str, float]]) -> ChoiceAnswer:
