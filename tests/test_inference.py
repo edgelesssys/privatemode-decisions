@@ -190,3 +190,15 @@ def test_the_default_temperature_follows_the_model_that_answered():
     assert serving("glm-5.3-flash") == pytest.approx(flash)          # the alias as measured
     assert serving("kimi-k2.6") == pytest.approx(default_temperature("kimi-k2.6", 4))
     assert serving("some-new-model") == 1.0                         # moved to an unmeasured model
+
+
+@pytest.mark.parametrize("options", [60, 151])
+def test_option_mass_sums_the_options_before_the_mask(options):
+    """One read, and two reads under one mask above 128 options: the mass
+    is the unmasked probability of all options, across both reads."""
+    engine, server = make_engine()
+    answer = engine.system_one("state", {"q": question(options)}).answers["q"]
+    assert len(server.payloads) == (1 if options <= MAX_LOGPROB_TOKEN_IDS else 2)
+    expected = math.fsum(math.exp(logprob(i)) for i in INDEX_IDS[:options])
+    assert answer.option_mass == pytest.approx(expected)
+    assert 0 < answer.option_mass < 1
