@@ -105,17 +105,24 @@ def default_temperature(model: str, options: int, family: str | None = None) -> 
     return math.exp(a + b * math.log(max(options, 2)))
 
 
-def scale(probabilities: Mapping[str, float], temperature: float) -> dict[str, float]:
-    """``p ** (1 / T)``, renormalized."""
-    if temperature <= 0:
-        raise ValueError("temperature must be positive")
-    if temperature == 1:
-        return dict(probabilities)
-    logs = {k: math.log(max(p, _FLOOR)) / temperature for k, p in probabilities.items()}
-    top = max(logs.values())
-    weights = {k: math.exp(v - top) for k, v in logs.items()}
+def _softmax(logits: Mapping[str, float]) -> dict[str, float]:
+    top = max(logits.values())
+    weights = {k: math.exp(v - top) for k, v in logits.items()}
     total = math.fsum(weights.values())
     return {k: w / total for k, w in weights.items()}
+
+
+def _check_temperature(temperature: float) -> None:
+    if not (temperature > 0 and math.isfinite(temperature)):
+        raise ValueError("temperature must be a positive finite number")
+
+
+def scale(probabilities: Mapping[str, float], temperature: float) -> dict[str, float]:
+    """``p ** (1 / T)``, renormalized."""
+    _check_temperature(temperature)
+    if temperature == 1:
+        return dict(probabilities)
+    return _softmax({k: math.log(max(p, _FLOOR)) / temperature for k, p in probabilities.items()})
 
 
 def peakedness(probabilities: Iterable[float]) -> float:
@@ -326,12 +333,9 @@ def correct(probabilities: Mapping[str, float], temperature: float,
     """``softmax(log p / T + b)``: :func:`scale` plus a bias per option."""
     if not bias:
         return scale(probabilities, temperature)
-    logs = {k: math.log(max(p, _FLOOR)) / temperature + bias.get(k, 0.0)
-            for k, p in probabilities.items()}
-    top = max(logs.values())
-    weights = {k: math.exp(v - top) for k, v in logs.items()}
-    total = math.fsum(weights.values())
-    return {k: w / total for k, w in weights.items()}
+    _check_temperature(temperature)
+    return _softmax({k: math.log(max(p, _FLOOR)) / temperature + bias.get(k, 0.0)
+                     for k, p in probabilities.items()})
 
 
 @dataclass(frozen=True)

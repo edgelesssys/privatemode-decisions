@@ -29,7 +29,7 @@ from pathlib import PurePath
 from time import perf_counter
 from typing import Any
 
-from .calibration import ALIASES, FORMULAS, default_temperature, rescale
+from .calibration import ALIASES, FORMULAS, default_temperature, peakedness, rescale
 from .client import OpenAIClient
 from .images import to_data_url
 from .tokens import MAX_AGE, TokenOracle
@@ -93,16 +93,6 @@ def _normalized(weights: dict[str, float]) -> dict[str, float]:
     return {name: w / total for name, w in weights.items()}
 
 
-def _peakedness(probabilities: list[float]) -> float:
-    """1 for all mass on one option, 0 for a uniform spread: one minus the
-    entropy in units of its maximum, ``log(n)``."""
-    n = len(probabilities)
-    if n < 2:
-        return 1.0
-    entropy = math.fsum(-p * math.log(p) for p in probabilities if p > 0)
-    return min(1.0, max(0.0, 1.0 - entropy / math.log(n)))
-
-
 def _as_sequence(images: Any) -> tuple:
     """One image, several, or none -- callers should not have to care.
 
@@ -134,8 +124,8 @@ class SystemOne:
         self.temperature = temperature
         if isinstance(temperature, str):
             default_temperature(model, 2, temperature)   # fail now on an unknown family
-        elif temperature is not None and temperature <= 0:
-            raise ValueError("temperature must be positive")
+        elif temperature is not None and not (temperature > 0 and math.isfinite(temperature)):
+            raise ValueError("temperature must be a positive finite number")
         #: Option orders each question is asked in; see :func:`rotations`.
         #: The default costs nothing and measures the model as it is. The
         #: averaged answer gets the same default temperature: on the
@@ -461,7 +451,7 @@ class SystemOne:
         mass = math.fsum(math.fsum(vote.values()) for vote in votes) / len(votes)
         return ChoiceAnswer(choice=max(probabilities, key=probabilities.get),
                             probabilities=probabilities,
-                            confidence=_peakedness(list(probabilities.values())),
+                            confidence=peakedness(probabilities.values()),
                             option_mass=min(1.0, mass), temperature=1.0)
 
     def close(self) -> None:

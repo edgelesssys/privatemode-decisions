@@ -312,3 +312,11 @@ def test_too_few_labels_for_a_bias_fit_the_temperature_alone():
     assert calibrate(answers, labels).bias == {}
     answers, labels = biased_sample(MIN_BIAS_LABELS, seed=15)
     assert calibrate(answers, labels).bias
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
+def test_temperature_must_be_a_positive_finite_number(bad):
+    with pytest.raises(ValueError):
+        scale({"a": 0.6, "b": 0.4}, bad)
+    with pytest.raises(ValueError):
+        make_engine(temperature=bad)
