@@ -303,3 +303,12 @@ def test_a_calibration_survives_a_json_round_trip():
     restored = Calibration(**json.loads(json.dumps(asdict(fitted))))
     assert restored == fitted
     assert restored.predict_set(rescale(answers[0], 2.0)) == fitted.predict_set(rescale(answers[0], 2.0))
+
+
+def test_too_few_labels_for_a_bias_fit_the_temperature_alone():
+    from decisions.calibration import MIN_BIAS_LABELS
+
+    answers, labels = biased_sample(MIN_BIAS_LABELS - 1, seed=15)
+    assert calibrate(answers, labels).bias == {}
+    answers, labels = biased_sample(MIN_BIAS_LABELS, seed=15)
+    assert calibrate(answers, labels).bias

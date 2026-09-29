@@ -468,6 +468,9 @@ def _cutoff(scores: list[float], coverage: float) -> float:
 #: Folds for the out-of-fold probabilities :func:`calibrate` sets cutoffs and
 #: thresholds on when it fits a bias.
 FOLDS = 5
+#: Fewer labels than this and :func:`calibrate` fits the temperature alone:
+#: a bias per option needs every fold's fit to see a few labels.
+MIN_BIAS_LABELS = 2 * FOLDS
 
 
 def fold_order(n: int, seed: int = 0) -> list[int]:
@@ -518,7 +521,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       :func:`fit_temperature_bias`) also corrects a model that favours some
       options, and changes answers: on the benchmark, +2.0 points of
       accuracy from 100 labels. Use :meth:`Calibration.apply` to get the
-      corrected answer. ``bias=False`` fits the temperature alone.
+      corrected answer. ``bias=False`` fits the temperature alone, and so does
+      a call with fewer than :data:`MIN_BIAS_LABELS` labels.
     * **Prediction sets** contain the right option with probability
       ``coverage``, on average over new inputs. A few hundred labels make
       that reliable: on the benchmark, a 90% target landed between 85% and
@@ -566,13 +570,14 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
                          "calibrate answers from one model and one temperature setting")
     base = next(iter(temperatures), None)
     offsets: dict[str, float] = {}
-    if bias:
+    # Too few labels to fit a bias and still hold answers out of it.
+    if bias and len(answers) >= MIN_BIAS_LABELS:
         temperature, offsets = fit_temperature_bias(answers, labels)
-        scaled = _out_of_fold(answers, labels, FOLDS) if len(answers) >= FOLDS else [
-            correct(a.probabilities, temperature, offsets) for a in answers]
+        scaled = _out_of_fold(answers, labels, FOLDS)
     else:
         temperature = fit_temperature(answers, labels)
         scaled = [scale(a.probabilities, temperature) for a in answers]
+    always: tuple[str, ...] = ()
     if per_class:
         by_label: dict[str, list[float]] = {}
         for p, label in zip(scaled, labels, strict=True):
@@ -591,7 +596,7 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
             max_error, delta)
     return Calibration(temperature=temperature, cutoffs=cutoffs, coverage=coverage,
                        examples=len(scaled), threshold=threshold, max_error=max_error,
-                       always_included=always if per_class else (), bias=offsets,
+                       always_included=always, bias=offsets,
                        options=options, base_temperature=base)
 
 
