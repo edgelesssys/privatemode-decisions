@@ -40,7 +40,9 @@ class ChoiceAnswer:
     confidence: float
     #: Probability the model put on the option tokens before the mask, out of
     #: its whole vocabulary. Low means the model wanted to say something
-    #: else. Not in TypeSafe's SDK; ``None`` where it isn't known.
+    #: else. It is for checking that the prompt fits a model, not a signal
+    #: about individual answers. Not in TypeSafe's SDK; ``None`` where it
+    #: isn't known.
     option_mass: float | None = None
     #: The calibration temperature the probabilities were divided by (1 for
     #: raw), so a fitted :class:`~decisions.Calibration` can check it is

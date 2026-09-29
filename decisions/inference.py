@@ -127,13 +127,8 @@ class SystemOne:
         elif temperature is not None and not (temperature > 0 and math.isfinite(temperature)):
             raise ValueError("temperature must be a positive finite number")
         #: Option orders each question is asked in; see :func:`rotations`.
-        #: The default costs nothing and measures the model as it is. The
-        #: averaged answer gets the same default temperature: on the
-        #: benchmark, with 2 and 4 orders it was as good as any other
-        #: choice without labels, and a task's own temperature from
-        #: :func:`~decisions.calibrate` on answers asked the same way does
-        #: better. Averaging changed accuracy by −0.3 points (not
-        #: significant) for four times the requests.
+        #: The default costs nothing and measures the model as it is.
+        #: Averaged answers get the same default temperature.
         self.permutations = max(1, int(permutations))
         #: Ids read per request; a question with more options is read in
         #: several requests under the same mask. See :func:`batches`.

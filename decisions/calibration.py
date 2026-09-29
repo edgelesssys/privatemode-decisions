@@ -154,8 +154,8 @@ def _nll(logs: Sequence[tuple[list[float], int]], temperature: float) -> float:
 
 
 #: How strongly :func:`fit_temperature` pulls towards the temperature the
-#: answers already have, in pseudo-examples. On the benchmark it improved a
-#: fit from 20 labels by an eighth and changed nothing from 100 labels on.
+#: answers already have, in pseudo-examples; chosen on the benchmark, where
+#: it matters most with a few dozen labels.
 SHRINKAGE = 5.0
 
 
@@ -199,9 +199,8 @@ def fit_temperature(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
 
 
 #: How strongly :func:`fit_temperature_bias` pulls the bias per option
-#: towards 0, in pseudo-examples. Chosen on the benchmark: 2 gained 2.0
-#: points of accuracy from 100 labels, 0.5 a little more with a worse
-#: worst case, 20 less than half.
+#: towards 0, in pseudo-examples; chosen on the benchmark (weaker gained a
+#: little more on average with a worse worst case, stronger much less).
 BIAS_STRENGTH = 2.0
 
 
@@ -312,9 +311,7 @@ def fit_temperature_bias(answers: Sequence[ChoiceAnswer], labels: Sequence[str],
     minimizing negative log-likelihood on labelled answers.
 
     The bias corrects a model that favours some options regardless of the
-    input; unlike the temperature, it can change the chosen option. On the
-    benchmark it gained 2.0 points of accuracy from 100 labels (1.0 from 20,
-    3.0 from 500), most where the model over-predicts a class. With two
+    input; unlike the temperature, it can change the chosen option. With two
     options this is Platt scaling. Both are pulled towards no change:
     ``shrinkage / n · (log T)² + strength / n · |b|²``, so with few labels
     the fit stays close to the answers as they are. Returns the temperature
@@ -522,28 +519,21 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     ``answers`` are what :meth:`~decisions.SystemOne.system_one` returned for
     one question on a random sample of inputs, ``labels`` the right option
     for each. The guarantees need new inputs to come from the same
-    distribution as the labelled ones.
+    distribution as the labelled ones; labels from escalated cases only
+    break them. The README has the benchmark numbers behind each part.
 
     * **The correction.** A temperature makes the probabilities honest
       without changing the answer; the bias per option (``bias=True``, see
       :func:`fit_temperature_bias`) also corrects a model that favours some
-      options, and changes answers: on the benchmark, +2.0 points of
-      accuracy from 100 labels. Use :meth:`Calibration.apply` to get the
-      corrected answer. ``bias=False`` fits the temperature alone, and so does
-      a call with fewer than :data:`MIN_BIAS_LABELS` labels.
-    * **Prediction sets** contain the right option with probability
-      ``coverage``, on average over new inputs. A few hundred labels make
-      that reliable: on the benchmark, a 90% target landed between 85% and
-      95% with 100 labels and between 87% and 92% with 500 (5th to 95th
-      percentile). With ``per_class=True`` it holds for every option
-      separately, which matters when one is rare: on the benchmark's
-      imbalanced tasks the rare class was covered only 70–76% of the time
-      with one cutoff, and 97% with one per class, at the price of larger sets.
-      A cutoff per option needs at least ``coverage / (1 - coverage)`` labels
-      of that option, 9 at 90%: an option with fewer is put in every set
-      (:attr:`Calibration.always_included`), which makes sets larger. With
-      100 labels and an 8% class, that is likely; with a hundred options it
-      is most of them.
+      options, and so changes answers: use :meth:`Calibration.apply`.
+      ``bias=False`` fits the temperature alone, and so does a call with
+      fewer than :data:`MIN_BIAS_LABELS` labels.
+    * **Prediction sets** (:meth:`Calibration.predict_set`) contain the
+      right option with probability ``coverage``, on average over new
+      inputs. With ``per_class=True`` that holds for every option
+      separately; a cutoff per option needs at least
+      ``coverage / (1 - coverage)`` labels of it (9 at 90%), and an option
+      with fewer is put in every set (:attr:`Calibration.always_included`).
     * **Automation** (``max_error``, e.g. 0.05): :meth:`Calibration.automate`
       says yes from a threshold on the corrected answer's top probability
       (not ``ChoiceAnswer.confidence``), chosen so that the error among
@@ -551,20 +541,15 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       ``1 - delta``. The procedure follows Learn then Test: thresholds that
       automate 5%, 10%, ... of the labelled answers are tested in order with
       an exact binomial test, stopping at the first that can't be certified.
-      Unlike textbook Learn then Test, the candidate thresholds are the
-      labelled answers' own top probabilities rather than a grid fixed in
-      advance, so the bound is not exact; it held on the benchmark. Picking
-      the threshold where the *observed* error equals ``max_error`` instead
-      broke its promise on about 40% of the benchmark's samples.
+      The candidate thresholds are the labelled answers' own top
+      probabilities rather than a grid fixed in advance, so the bound is
+      validated on the benchmark, not exact.
 
     With a bias, the cutoffs and the threshold are set on out-of-fold
-    probabilities: each label's answer corrected by a fit on the other
-    :data:`FOLDS` folds. Set on the answers the bias was fitted to, they
-    trusted it too much, and at 500 labels the error bound broke on 2 of 23
-    benchmark datasets; out-of-fold, at most 1.3% of samples were over it
-    and 90% sets covered 90.3–91.3%. A temperature alone is one number and
-    uses the same labels for everything, which held (at most 1.1% of samples
-    over the bound, coverage 89.8–90.6%) and automates a little more.
+    probabilities (each answer corrected by a fit on the other
+    :data:`FOLDS` folds), because on the answers the bias was fitted to they
+    trust it too much. A temperature alone uses the same labels for all
+    steps.
     """
     if not 0 < coverage < 1:
         raise ValueError("coverage must be between 0 and 1")
@@ -620,10 +605,10 @@ def evaluate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     Returns ``accuracy``, ``confidence`` (mean top probability),
     ``overconfidence`` (the difference) and ``ece``: the gap between
     confidence and accuracy in ``bins`` equal-size groups of answers, sorted
-    by confidence, weighted by size. With a ``calibration`` its correction is
-    applied first (which can change answers, with a bias), and the result adds ``coverage`` and ``set_size`` of its
-    prediction sets, and ``automated`` and ``automated_error`` for
-    :meth:`Calibration.automate`.
+    by confidence, weighted by size. With a ``calibration``, its correction
+    is applied first (with a bias, that can change answers), and the result
+    adds ``coverage`` and ``set_size`` of its prediction sets, and
+    ``automated`` and ``automated_error`` for :meth:`Calibration.automate`.
 
     ECE has a floor from sampling alone: a perfectly calibrated model shows a
     few points on a few hundred answers.

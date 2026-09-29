@@ -59,17 +59,18 @@ reference.
 8. **Report confidence as what it is.** `1 - entropy / log(n)` measures
    how peaked the distribution is, not whether the answer is right.
 9. **Calibrate before trusting the numbers.** Raw probabilities are
-   overconfident. Divide the log probabilities by a temperature (fitted
-   per model in `decisions/calibration.py`; it never changes the choice),
-   and use conformal sets from labelled data where a guarantee is needed.
-   With labels, also fit a bias per option (it changes answers; +2 points
-   from 100 labels), and then set the cutoffs and thresholds on
-   out-of-fold probabilities: on the labels the bias was fitted to, the
-   error bound broke.
-   Don't divide out a neutral-input prior: on the benchmark it made 24 of
-   28 datasets worse. For an error bound on automated answers, test
-   thresholds in the style of Learn then Test; the threshold where the observed error
-   equals the target breaks its promise about 40% of the time.
+   overconfident.
+   - Divide the log probabilities by a temperature, by default the one
+     fitted per model in `decisions/calibration.py`. It never changes the
+     choice.
+   - With labels, also fit a bias per option (it changes answers), and set
+     conformal cutoffs and automation thresholds on out-of-fold
+     probabilities, not on the answers the bias was fitted to.
+   - For an error bound on automated answers, test thresholds in order
+     with an exact binomial test (Learn then Test style), never at the
+     point where the observed error equals the target.
+   - Don't divide out a neutral-input prior: it mostly removes real
+     knowledge.
 
 ## Limits
 
