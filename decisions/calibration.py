@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 
 from .types import ChoiceAnswer
 
@@ -376,6 +376,22 @@ class Calibration:
         # Read back from JSON, these arrive as lists.
         object.__setattr__(self, "options", tuple(self.options))
         object.__setattr__(self, "always_included", tuple(self.always_included))
+
+    def to_dict(self) -> dict:
+        """Plain values for ``json.dumps``; an uncertified threshold
+        (``inf``) becomes ``None``, since JSON has no infinity."""
+        data = asdict(self)
+        if math.isinf(data["threshold"]):
+            data["threshold"] = None
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping) -> Calibration:
+        """The inverse of :meth:`to_dict`."""
+        data = dict(data)
+        if data.get("threshold") is None:
+            data["threshold"] = math.inf
+        return cls(**data)
 
     def check(self, answer: ChoiceAnswer) -> None:
         """Raise ``ValueError`` if the answer isn't like the ones this

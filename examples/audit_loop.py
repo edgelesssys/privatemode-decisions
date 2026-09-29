@@ -20,7 +20,7 @@ guarantees have to be checked where they are used. The loop:
    for the next round. Without a calibration yet, the first run fits one.
 
 The files are JSON lines. ``decisions.jsonl``: ``{"id": ..., "probabilities":
-{...}, "temperature": ...}`` per decision, as logged. ``to_label.jsonl`` gets
+{...}, "temperature": ...}`` per decision, as logged, oldest first. ``to_label.jsonl`` gets
 the drawn decisions; ``labels.jsonl`` holds ``{"id": ..., "label": ...}`` for
 the labelled ones. ``calibration.json`` holds the current calibration and
 is rewritten after a refit.
@@ -32,10 +32,11 @@ import argparse
 import json
 import math
 import random
-from dataclasses import asdict
+from dataclasses import replace
 from pathlib import Path
 
 from decisions import Calibration, ChoiceAnswer, calibrate, evaluate
+from decisions.calibration import rescale
 
 COVERAGE = 0.9      # for a first fit; afterwards the stored calibration's own
 MAX_ERROR = 0.05
@@ -56,18 +57,23 @@ def answer(decision: dict) -> ChoiceAnswer:
 
 
 def save(calibration: Calibration, path: Path) -> None:
-    """As JSON; an uncertified threshold (``inf``) is written as null."""
-    data = asdict(calibration)
-    if math.isinf(data["threshold"]):
-        data["threshold"] = None
-    path.write_text(json.dumps(data, indent=1))
+    path.write_text(json.dumps(calibration.to_dict(), indent=1))
 
 
 def restore(path: Path) -> Calibration:
-    data = json.loads(path.read_text())
-    if data["threshold"] is None:
-        data["threshold"] = math.inf
-    return Calibration(**data)
+    return Calibration.from_dict(json.loads(path.read_text()))
+
+
+def at_one_temperature(answers: list[ChoiceAnswer], target: float | None) -> list[ChoiceAnswer]:
+    """The answers at the temperature of the newest decision. A sample that
+    spans a change of default (a regenerated constant, a moved alias) mixes
+    temperatures, which ``calibrate()`` refuses; temperatures compose, so
+    each answer is rescaled by ``target / its own``."""
+    if target is None:
+        return answers
+    return [a if a.temperature in (None, target)
+            else replace(rescale(a, target / a.temperature), temperature=target)
+            for a in answers]
 
 
 def draw(decisions: list[dict], n: int, seed: int | None = None) -> list[dict]:
@@ -91,10 +97,12 @@ def drifted(report: dict[str, float], calibration: Calibration, n: int) -> list[
 
 
 def check(decisions_path: Path, labels_path: Path, calibration_path: Path) -> None:
-    decisions = {d["id"]: d for d in load(decisions_path)}
+    logged = load(decisions_path)
+    decisions = {d["id"]: d for d in logged}
     labelled = [(decisions[row["id"]], row["label"]) for row in load(labels_path)
                 if row["id"] in decisions]
     answers = [answer(d) for d, _ in labelled]
+    newest = logged[-1].get("temperature") if logged else None
     labels = [label for _, label in labelled]
     coverage, max_error = COVERAGE, MAX_ERROR
     if calibration_path.exists():
@@ -113,7 +121,8 @@ def check(decisions_path: Path, labels_path: Path, calibration_path: Path) -> No
             print("drift:", "; ".join(problems))
     # Refit on this audit's labels. They are a fresh random sample, so the
     # new calibration's guarantees hold for traffic like today's.
-    fitted = calibrate(answers, labels, coverage=coverage, max_error=max_error)
+    fitted = calibrate(at_one_temperature(answers, newest), labels,
+                       coverage=coverage, max_error=max_error)
     save(fitted, calibration_path)
     print(f"refitted on {len(labels)} labels: T = {fitted.temperature:.2f}, "
           f"threshold {fitted.threshold:.3f}")

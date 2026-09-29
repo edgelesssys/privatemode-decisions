@@ -68,6 +68,8 @@ class Usage:
 
 @dataclass(frozen=True)
 class SystemOneResponse:
+    #: The model that answered, as the server reports it: an alias such as
+    #: ``glm-flash-latest`` comes back as the model it resolved to.
     model: str
     answers: dict[str, ChoiceAnswer]
     usage: Usage = field(default_factory=Usage)

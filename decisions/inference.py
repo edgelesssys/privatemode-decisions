@@ -402,7 +402,7 @@ class SystemOne:
                                 self._temperature(len(prepared[key].criteria), served))
                    for key in keys}
         return SystemOneResponse(
-            model=self.model,
+            model=served or self.model,
             answers=answers,
             usage=Usage(input_tokens=input_tokens, output_tokens=len(requests),
                         cached_tokens=cached_tokens),

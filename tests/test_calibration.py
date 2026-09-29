@@ -292,15 +292,17 @@ def test_calibrate_refuses_answers_at_different_temperatures():
         calibrate(mixed, labels)
 
 
-def test_a_calibration_survives_a_json_round_trip():
+@pytest.mark.parametrize("max_error", [None, 0.2])
+def test_a_calibration_survives_a_json_round_trip(max_error):
+    """Through standard JSON (no Infinity), with and without a threshold."""
     import json
-    from dataclasses import asdict
 
     from decisions import Calibration
 
     answers, labels = biased_sample(300, seed=14)
-    fitted = calibrate([rescale(a, 2.0) for a in answers], labels, per_class=True)
-    restored = Calibration(**json.loads(json.dumps(asdict(fitted))))
+    fitted = calibrate([rescale(a, 2.0) for a in answers], labels, per_class=True,
+                       max_error=max_error)
+    restored = Calibration.from_dict(json.loads(json.dumps(fitted.to_dict(), allow_nan=False)))
     assert restored == fitted
     assert restored.predict_set(rescale(answers[0], 2.0)) == fitted.predict_set(rescale(answers[0], 2.0))
 
