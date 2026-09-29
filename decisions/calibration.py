@@ -443,7 +443,8 @@ def _binomial_cdf(k: int, n: int, p: float) -> float:
 
 def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
                           max_error: float, delta: float, step: float = 0.05) -> float:
-    """Learn then Test, fixed sequence over a grid: see :func:`calibrate`."""
+    """Fixed-sequence binomial tests over levels of the labelled answers'
+    own top probabilities (Learn then Test style): see :func:`calibrate`."""
     pairs = sorted(zip(confidences, right, strict=True), key=lambda cr: -cr[0])
     conf = [cf for cf, _ in pairs]
     errors, running = [], 0
@@ -547,9 +548,12 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       says yes from a threshold on the corrected answer's top probability
       (not ``ChoiceAnswer.confidence``), chosen so that the error among
       automated answers is at most ``max_error`` with probability
-      ``1 - delta``. This is Learn then Test: thresholds that automate 5%,
-      10%, ... of the labelled answers are tested in order with an exact
-      binomial test, stopping at the first that can't be certified. Picking
+      ``1 - delta``. The procedure follows Learn then Test: thresholds that
+      automate 5%, 10%, ... of the labelled answers are tested in order with
+      an exact binomial test, stopping at the first that can't be certified.
+      Unlike textbook Learn then Test, the candidate thresholds are the
+      labelled answers' own top probabilities rather than a grid fixed in
+      advance, so the bound is not exact; it held on the benchmark. Picking
       the threshold where the *observed* error equals ``max_error`` instead
       broke its promise on about 40% of the benchmark's samples.
 

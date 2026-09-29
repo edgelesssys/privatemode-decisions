@@ -68,7 +68,7 @@ reference.
    error bound broke.
    Don't divide out a neutral-input prior: on the benchmark it made 24 of
    28 datasets worse. For an error bound on automated answers, test
-   thresholds with Learn then Test; the threshold where the observed error
+   thresholds in the style of Learn then Test; the threshold where the observed error
    equals the target breaks its promise about 40% of the time.
 
 ## Limits
