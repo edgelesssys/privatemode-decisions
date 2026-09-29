@@ -183,7 +183,7 @@ a grid fixed in advance, so its 90% over the choice of labels is tested on
 the benchmark, not proven. So is fitting the correction on the same labels
 as the cutoffs. For a temperature alone at most 1.1% of samples broke the
 bound (10% allowed); with a bias, cutoffs and threshold are set
-out-of-fold, and at most 1.3% did. Labels collected only from escalated or
+out-of-fold, and at most 1.1% did. Labels collected only from escalated or
 disputed cases break all of it.
 
 **Why calibration happens in the client.** The library receives the raw log
