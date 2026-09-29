@@ -348,8 +348,9 @@ class Calibration:
     :meth:`apply` returns. ``cutoffs`` apply to ``1 - p`` after the
     correction: an option is in the prediction set when its probability is
     at least ``1 - cutoff``. There is one cutoff for all options, or one per
-    option with ``per_class=True``. ``threshold`` is the confidence above
-    which :meth:`automate` says yes, ``inf`` if nothing could be certified or
+    option with ``per_class=True``. ``threshold`` is the top probability (of
+    the corrected answer's chosen option) from which :meth:`automate` says
+    yes, ``inf`` if nothing could be certified or
     no ``max_error`` was asked for. ``always_included`` lists the options
     that had too few labels for a cutoff of their own (``per_class=True``):
     they are in every set.
@@ -422,9 +423,11 @@ class Calibration:
 
     def automate(self, answer: ChoiceAnswer) -> bool:
         """Whether to act on the corrected answer (:meth:`apply`) without a
-        person: its confidence is above the threshold that keeps the error
-        among automated answers at most ``max_error``, with 90% probability
-        over the labelled sample."""
+        person: the probability of its chosen option is at least the
+        threshold that keeps the error among automated answers at most
+        ``max_error``, with probability ``1 - delta`` over the labelled
+        sample. This is the top probability, not ``ChoiceAnswer.confidence``
+        (which measures how peaked the whole distribution is)."""
         return max(self.probabilities(answer).values()) >= self.threshold
 
 
@@ -541,7 +544,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       100 labels and an 8% class, that is likely; with a hundred options it
       is most of them.
     * **Automation** (``max_error``, e.g. 0.05): :meth:`Calibration.automate`
-      says yes above a confidence threshold chosen so that the error among
+      says yes from a threshold on the corrected answer's top probability
+      (not ``ChoiceAnswer.confidence``), chosen so that the error among
       automated answers is at most ``max_error`` with probability
       ``1 - delta``. This is Learn then Test: thresholds that automate 5%,
       10%, ... of the labelled answers are tested in order with an exact

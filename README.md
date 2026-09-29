@@ -156,8 +156,11 @@ puts only about two thirds of its probability on the options after
   `predict_set` contains the right option 90% of the time; with
   `per_class=True` that holds for every option, which matters when one is
   rare; an option with fewer than 9 labels (at 90%) is then in every set.
-  `automate` keeps the error among automated answers at most 5% with
-  90% confidence. A few hundred labels make both reliable, and a guarantee
+  `automate` acts on answers whose top probability (after the
+  correction) clears a fitted threshold, and keeps the error among them at
+  most 5% with probability 90% over the choice of labels. That is the top
+  probability, not `answer.confidence`, which measures how peaked the whole
+  distribution is. A few hundred labels make both reliable, and a guarantee
   costs automation: on the benchmark, a 5% error bound let about a fifth of
   answers through, 10% about a third. `bias=False` fits the temperature
   alone, which never changes an answer and automates a little more (27%
