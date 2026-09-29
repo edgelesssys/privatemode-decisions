@@ -257,3 +257,13 @@ def test_measured_models_and_their_aliases_have_defaults():
                          ("glm-flash-latest", "glm-5.3-flash")):
         assert default_temperature(alias, 4) == default_temperature(model, 4) > 1
     assert default_temperature("some-unmeasured-model", 4) == 1.0
+
+
+def test_out_of_fold_calibration_does_not_depend_on_the_label_order():
+    answers, labels = biased_sample(500, seed=11)
+    shuffled = calibrate(answers, labels, max_error=0.15)
+    ranked = sorted(zip(answers, labels), key=lambda al: al[1])     # grouped by class
+    grouped = calibrate([a for a, _ in ranked], [l for _, l in ranked], max_error=0.15)
+    assert grouped.threshold < math.inf
+    assert grouped.threshold == pytest.approx(shuffled.threshold, abs=0.05)
+    assert grouped.cutoffs["*"] == pytest.approx(shuffled.cutoffs["*"], abs=0.05)

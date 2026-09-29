@@ -24,6 +24,7 @@ use :meth:`Calibration.apply`.
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
@@ -435,23 +436,35 @@ def _cutoff(scores: list[float], coverage: float) -> float:
 FOLDS = 5
 
 
+def fold_order(n: int, seed: int = 0) -> list[int]:
+    """The order in which labelled answers are dealt into folds: a seeded
+    permutation, so folds don't depend on how the labels were sorted (a
+    file grouped by class would otherwise leave a class out of a fit)."""
+    order = list(range(n))
+    random.Random(seed).shuffle(order)
+    return order
+
+
 def _out_of_fold(answers: Sequence[ChoiceAnswer], labels: Sequence[str],
                  folds: int) -> list[dict[str, float]]:
     """Each labelled answer corrected by a temperature and bias fitted on the
-    other folds (consecutive runs, the first ``n % folds`` one longer)."""
+    other folds: consecutive runs of :func:`fold_order`, the first
+    ``n % folds`` one longer."""
     n = len(answers)
-    out: list[dict[str, float]] = []
+    order = fold_order(n)
+    out: list[dict[str, float] | None] = [None] * n
     start = 0
     for fold in range(folds):
         size = n // folds + (fold < n % folds)
         if not size:
             continue
-        stop = start + size
-        rest = [i for i in range(n) if not start <= i < stop]
+        held = order[start:start + size]
+        rest = order[:start] + order[start + size:]
         t, b = fit_temperature_bias([answers[i] for i in rest], [labels[i] for i in rest])
-        out += [correct(answers[i].probabilities, t, b) for i in range(start, stop)]
-        start = stop
-    return out
+        for i in held:
+            out[i] = correct(answers[i].probabilities, t, b)
+        start += size
+    return out  # type: ignore[return-value]
 
 
 def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
