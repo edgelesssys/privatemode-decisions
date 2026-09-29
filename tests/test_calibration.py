@@ -267,3 +267,39 @@ def test_out_of_fold_calibration_does_not_depend_on_the_label_order():
     assert grouped.threshold < math.inf
     assert grouped.threshold == pytest.approx(shuffled.threshold, abs=0.05)
     assert grouped.cutoffs["*"] == pytest.approx(shuffled.cutoffs["*"], abs=0.05)
+
+
+def test_a_calibration_refuses_answers_unlike_its_own():
+    answers, labels = biased_sample(300, seed=12)
+    at_default = [rescale(a, 2.0) for a in answers]           # as SystemOne reports them
+    calibration = calibrate(at_default, labels)
+    assert calibration.base_temperature == pytest.approx(2.0)
+    assert calibration.options == ("a", "b", "c")
+    calibration.apply(rescale(answers[0], 2.0))                # the same kind: fine
+    with pytest.raises(ValueError, match="temperature"):
+        calibration.apply(rescale(answers[0], 2.5))            # the default moved
+    renamed = answer({"a": 0.5, "b": 0.3, "d": 0.2})
+    with pytest.raises(ValueError, match="options"):
+        calibration.predict_set(renamed)
+    # Answers without a known temperature (e.g. from a log) are only checked for options.
+    calibration.automate(answers[0])
+
+
+def test_calibrate_refuses_answers_at_different_temperatures():
+    answers, labels = biased_sample(100, seed=13)
+    mixed = [rescale(a, 2.0 if i % 2 else 3.0) for i, a in enumerate(answers)]
+    with pytest.raises(ValueError, match="different temperatures"):
+        calibrate(mixed, labels)
+
+
+def test_a_calibration_survives_a_json_round_trip():
+    import json
+    from dataclasses import asdict
+
+    from decisions import Calibration
+
+    answers, labels = biased_sample(300, seed=14)
+    fitted = calibrate([rescale(a, 2.0) for a in answers], labels, per_class=True)
+    restored = Calibration(**json.loads(json.dumps(asdict(fitted))))
+    assert restored == fitted
+    assert restored.predict_set(rescale(answers[0], 2.0)) == fitted.predict_set(rescale(answers[0], 2.0))

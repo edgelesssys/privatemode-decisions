@@ -449,7 +449,7 @@ class SystemOne:
         return ChoiceAnswer(choice=max(probabilities, key=probabilities.get),
                             probabilities=probabilities,
                             confidence=_peakedness(list(probabilities.values())),
-                            option_mass=min(1.0, mass))
+                            option_mass=min(1.0, mass), temperature=1.0)
 
     def close(self) -> None:
         self._pool.shutdown(wait=False)

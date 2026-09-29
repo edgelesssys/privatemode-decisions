@@ -128,10 +128,13 @@ def peakedness(probabilities: Iterable[float]) -> float:
 
 
 def rescale(answer: ChoiceAnswer, temperature: float) -> ChoiceAnswer:
-    """The same answer with its probabilities and confidence rescaled."""
+    """The same answer with its probabilities and confidence rescaled.
+    Temperatures compose, so ``answer.temperature`` is multiplied."""
     probabilities = scale(answer.probabilities, temperature)
+    base = 1.0 if answer.temperature is None else answer.temperature
     return replace(answer, probabilities=probabilities,
-                   confidence=peakedness(probabilities.values()))
+                   confidence=peakedness(probabilities.values()),
+                   temperature=base * temperature)
 
 
 def _nll(logs: Sequence[tuple[list[float], int]], temperature: float) -> float:
@@ -346,6 +349,14 @@ class Calibration:
     no ``max_error`` was asked for. ``always_included`` lists the options
     that had too few labels for a cutoff of their own (``per_class=True``):
     they are in every set.
+
+    A calibration is relative to the answers it was fitted on: ``options``
+    are their option names in order, and ``base_temperature`` the
+    temperature they already had (``ChoiceAnswer.temperature``; for
+    :class:`~decisions.SystemOne` answers the model's default, which depends
+    on the model and the number of options). Applying it to an answer with
+    other options, or at another temperature (a regenerated default, a moved
+    alias, another ``temperature=``), raises ``ValueError``: refit instead.
     """
 
     temperature: float
@@ -356,17 +367,40 @@ class Calibration:
     max_error: float | None = None
     always_included: tuple[str, ...] = ()
     bias: Mapping[str, float] = field(default_factory=dict)
+    options: tuple[str, ...] = ()
+    base_temperature: float | None = None
+
+    def __post_init__(self) -> None:
+        # Read back from JSON, these arrive as lists.
+        object.__setattr__(self, "options", tuple(self.options))
+        object.__setattr__(self, "always_included", tuple(self.always_included))
+
+    def check(self, answer: ChoiceAnswer) -> None:
+        """Raise ``ValueError`` if the answer isn't like the ones this
+        calibration was fitted on (options, or the temperature it has)."""
+        if self.options and tuple(answer.probabilities) != self.options:
+            raise ValueError(f"calibrated for the options {list(self.options)}, "
+                             f"but the answer has {list(answer.probabilities)}")
+        if (self.base_temperature is not None and answer.temperature is not None
+                and not math.isclose(answer.temperature, self.base_temperature, rel_tol=1e-9)):
+            raise ValueError(
+                f"calibrated on answers at temperature {self.base_temperature:.4g}, but this "
+                f"one is at {answer.temperature:.4g}: the model or its default temperature "
+                "changed; refit with calibrate()")
 
     def probabilities(self, answer: ChoiceAnswer) -> dict[str, float]:
         """The answer's probabilities with this task's correction applied."""
+        self.check(answer)
         return correct(answer.probabilities, self.temperature, self.bias)
 
     def apply(self, answer: ChoiceAnswer) -> ChoiceAnswer:
         """The corrected answer. With a bias the chosen option can change."""
         probabilities = self.probabilities(answer)
+        base = 1.0 if answer.temperature is None else answer.temperature
         return replace(answer, choice=max(probabilities, key=probabilities.get),
                        probabilities=probabilities,
-                       confidence=peakedness(probabilities.values()))
+                       confidence=peakedness(probabilities.values()),
+                       temperature=base * self.temperature)
 
     def predict_set(self, answer: ChoiceAnswer) -> list[str]:
         """The options that contain the right one with probability
@@ -521,6 +555,16 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     if max_error is not None and not 0 < max_error < 1:
         raise ValueError("max_error must be between 0 and 1")
     labels = list(labels)
+    if not answers:
+        raise ValueError("no labelled answers to fit on")
+    options = tuple(answers[0].probabilities)
+    if any(tuple(a.probabilities) != options for a in answers):
+        raise ValueError("every answer must have the same options, in the same order")
+    temperatures = {a.temperature for a in answers if a.temperature is not None}
+    if len(temperatures) > 1:
+        raise ValueError(f"the answers are at different temperatures {sorted(temperatures)}; "
+                         "calibrate answers from one model and one temperature setting")
+    base = next(iter(temperatures), None)
     offsets: dict[str, float] = {}
     if bias:
         temperature, offsets = fit_temperature_bias(answers, labels)
@@ -547,7 +591,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
             max_error, delta)
     return Calibration(temperature=temperature, cutoffs=cutoffs, coverage=coverage,
                        examples=len(scaled), threshold=threshold, max_error=max_error,
-                       always_included=always if per_class else (), bias=offsets)
+                       always_included=always if per_class else (), bias=offsets,
+                       options=options, base_temperature=base)
 
 
 def evaluate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,

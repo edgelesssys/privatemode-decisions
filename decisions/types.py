@@ -42,6 +42,11 @@ class ChoiceAnswer:
     #: its whole vocabulary. Low means the model wanted to say something
     #: else. Not in TypeSafe's SDK; ``None`` where it isn't known.
     option_mass: float | None = None
+    #: The calibration temperature the probabilities were divided by (1 for
+    #: raw), so a fitted :class:`~decisions.Calibration` can check it is
+    #: applied to answers like the ones it was fitted on. Not in TypeSafe's
+    #: SDK; ``None`` where it isn't known.
+    temperature: float | None = None
 
 
 @dataclass(frozen=True)

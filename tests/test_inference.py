@@ -162,3 +162,10 @@ def test_a_position_prior_averages_out():
         for n, i in enumerate(payload["logprob_token_ids"])]}]}}]}, 0.01)
     result = engine.system_one("state", {"q": question(3)}, permutations=3)
     assert list(result.answers["q"].probabilities.values()) == pytest.approx([1 / 3] * 3)
+
+
+def test_answers_carry_the_temperature_they_were_reported_at():
+    engine, _ = make_engine(temperature=3.0)
+    assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 3.0
+    engine, _ = make_engine()                      # an unmeasured model stays raw
+    assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 1.0
