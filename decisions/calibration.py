@@ -87,6 +87,8 @@ ALIASES: dict[str, str] = {
 # --- end generated ------------------------------------------------------------
 
 _FLOOR = 1e-300
+#: The temperatures the fits search, as log T: 0.05 to 50.
+LOG_T_BOUNDS = (math.log(0.05), math.log(50.0))
 
 
 def default_temperature(model: str, options: int, family: str | None = None) -> float:
@@ -182,7 +184,7 @@ def fit_temperature(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     def loss(log_t: float) -> float:
         return _nll(logs, math.exp(log_t)) + shrinkage / len(logs) * log_t ** 2
 
-    a, b = math.log(0.05), math.log(50.0)
+    a, b = LOG_T_BOUNDS
     g = (math.sqrt(5) - 1) / 2
     c, d = b - g * (b - a), a + g * (b - a)
     fc, fd = loss(c), loss(d)
@@ -225,6 +227,10 @@ def _loss_and_gradient(theta: list[float], rows: list[list[float]], gold: list[i
     """Mean NLL of ``softmax(log p · e^−s + b)`` plus the pulls, and its
     gradient in ``(s, b)``, where ``s = log T``."""
     k = len(theta) - 1
+    if not LOG_T_BOUNDS[0] <= theta[0] <= LOG_T_BOUNDS[1]:
+        # Outside the temperatures fit_temperature searches: an infinite
+        # loss makes the line search step back instead of overflowing.
+        return math.inf, [0.0] * len(theta)
     inverse = math.exp(-theta[0])
     bias = theta[1:]
     total, grad_s = 0.0, 0.0
@@ -571,6 +577,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
         raise ValueError("coverage must be between 0 and 1")
     if max_error is not None and not 0 < max_error < 1:
         raise ValueError("max_error must be between 0 and 1")
+    if not 0 < delta < 1:
+        raise ValueError("delta must be between 0 and 1")
     labels = list(labels)
     if not answers:
         raise ValueError("no labelled answers to fit on")

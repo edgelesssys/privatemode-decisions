@@ -322,3 +322,69 @@ def test_temperature_must_be_a_positive_finite_number(bad):
         scale({"a": 0.6, "b": 0.4}, bad)
     with pytest.raises(ValueError):
         make_engine(temperature=bad)
+
+
+def test_extreme_logits_stay_within_the_searched_temperatures():
+    """Near one-hot answers with many exact zeros once drove the joint fit's
+    line search to exp overflow."""
+    from decisions.types import ChoiceAnswer
+
+    rng = random.Random(24)
+    names = [f"o{i}" for i in range(20)]
+    answers, labels = [], []
+    for _ in range(60):
+        logits = [rng.gauss(0, 800) for _ in names]
+        top = max(logits)
+        weights = [math.exp(v - top) for v in logits]
+        total = sum(weights)
+        probabilities = {n: w / total for n, w in zip(names, weights)}
+        answers.append(ChoiceAnswer(choice=max(probabilities, key=probabilities.get),
+                                    probabilities=probabilities, confidence=1.0))
+        labels.append(rng.choice(names))
+    fitted = calibrate(answers, labels)
+    assert 0.05 <= fitted.temperature <= 50
+
+
+@pytest.mark.parametrize("delta", [0.0, 1.0, 1.5, -0.1])
+def test_delta_must_be_a_probability(delta):
+    answers, labels = biased_sample(50, seed=25)
+    with pytest.raises(ValueError, match="delta"):
+        calibrate(answers, labels, max_error=0.1, delta=delta)
+
+
+def test_the_automation_threshold_certifies_levels_in_order():
+    from decisions.calibration import _automation_threshold
+
+    confidences = [1 - i / 1000 for i in range(100)]
+    # All right: every level passes, down to the least confident answer.
+    assert _automation_threshold(confidences, [True] * 100, 0.1, 0.1) == confidences[-1]
+    # The first level that can pass (22 answers at 10%, here the top 25)
+    # holds errors: nothing is certified, even if the rest is clean.
+    right = [i >= 10 for i in range(100)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == math.inf
+    # Errors from the 61st answer on: the top 60 pass, the top 65 (5 errors)
+    # fail, so the sequence stops there and keeps the top 60.
+    right = [i < 60 for i in range(100)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[59]
+    # Too few answers for any level: nothing.
+    assert _automation_threshold(confidences[:20], [True] * 20, 0.1, 0.1) == math.inf
+
+
+def test_the_automation_threshold_never_splits_equal_confidences():
+    from decisions.calibration import _automation_threshold
+
+    # 40 answers share the top confidence; a level can't stop inside them.
+    confidences = [0.99] * 40 + [0.5 - i / 1000 for i in range(60)]
+    right = [True] * 100
+    chosen = _automation_threshold(confidences, right, 0.1, 0.1)
+    assert chosen == confidences[-1]
+    right = [True] * 40 + [False] * 60
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == 0.99
+
+
+@pytest.mark.parametrize("n, expected", [(8, 1.0), (9, 0.9)])
+def test_the_conformal_cutoff_needs_nine_scores_at_ninety_percent(n, expected):
+    from decisions.calibration import _cutoff
+
+    scores = [i / 10 for i in range(1, n + 1)]      # 0.1 ... 0.n
+    assert _cutoff(scores, 0.9) == pytest.approx(expected)
