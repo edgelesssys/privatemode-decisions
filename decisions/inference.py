@@ -25,6 +25,7 @@ import math
 import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import PurePath
 from time import perf_counter
 from typing import Any
@@ -398,8 +399,9 @@ class SystemOne:
         # as glm-flash-latest can move, and the default temperature belongs
         # to the model, not the name it was asked by.
         served = next((body.get("model") for _, _, body, _ in results if body.get("model")), None)
-        answers = {key: rescale(self._merge(prepared[key], votes[key]),
-                                self._temperature(len(prepared[key].criteria), served))
+        answers = {key: replace(rescale(self._merge(prepared[key], votes[key]),
+                                        self._temperature(len(prepared[key].criteria), served)),
+                                model=served)
                    for key in keys}
         return SystemOneResponse(
             model=served or self.model,

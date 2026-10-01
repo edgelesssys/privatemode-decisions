@@ -59,3 +59,37 @@ def test_a_stored_calibration_is_standard_json(tmp_path):
     data = json.loads((tmp_path / "c.json").read_text())
     assert data["threshold"] is None
     assert Calibration.from_dict(data) == fitted
+
+
+def test_the_refit_leaves_out_another_models_decisions(tmp_path, capsys):
+    """The alias moved halfway: the older model's labelled decisions don't
+    describe the new one, so the refit uses the newest model's only."""
+    answers, labels = biased_sample(300, seed=27)
+    rows = logged(answers, [2.0] * 300)
+    for i, row in enumerate(rows):
+        row["model"] = "old-model" if i < 100 else "new-model"
+    decisions = write(tmp_path / "decisions.jsonl", rows)
+    labelled = write(tmp_path / "labels.jsonl", [{"id": i, "label": y} for i, y in enumerate(labels)])
+    audit_loop.check(decisions, labelled, tmp_path / "calibration.json")
+    assert "100 labelled decisions are from another model" in capsys.readouterr().out
+    fitted = audit_loop.restore(tmp_path / "calibration.json")
+    assert fitted.model == "new-model" and fitted.examples == 200
+
+
+def test_labels_that_are_not_options_stop_the_check(tmp_path):
+    answers, labels = biased_sample(50, seed=28)
+    decisions = write(tmp_path / "decisions.jsonl", logged(answers, [2.0] * 50))
+    labelled = write(tmp_path / "labels.jsonl",
+                     [{"id": i, "label": "z" if i == 3 else y} for i, y in enumerate(labels)])
+    with pytest.raises(SystemExit, match="not options"):
+        audit_loop.check(decisions, labelled, tmp_path / "calibration.json")
+
+
+def test_mixed_temperatures_without_a_newest_one_stop_the_refit(tmp_path):
+    answers, labels = biased_sample(50, seed=29)
+    rows = logged(answers, [2.0] * 25 + [3.0] * 25)
+    del rows[-1]["temperature"]
+    decisions = write(tmp_path / "decisions.jsonl", rows)
+    labelled = write(tmp_path / "labels.jsonl", [{"id": i, "label": y} for i, y in enumerate(labels)])
+    with pytest.raises(SystemExit, match="different temperatures"):
+        audit_loop.check(decisions, labelled, tmp_path / "calibration.json")

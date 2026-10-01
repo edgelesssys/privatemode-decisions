@@ -98,6 +98,9 @@ before reporting them (see [Calibration](#calibration)).
 one option). It measures how sure the model is, not whether it's right,
 and works as a threshold for sending answers to human review; see
 [Calibration](#calibration) for how far the probabilities can be trusted.
+`result.model` is the model that answered, not the name you asked for: an
+alias such as `glm-flash-latest` comes back as `glm-5.3-flash`. Log it with
+each decision to see when an alias moves.
 To include
 images, pass `images=` with paths, bytes, Pillow images or data URLs, and
 use a vision model such as `glm-flash-latest`.

@@ -49,6 +49,11 @@ class ChoiceAnswer:
     #: applied to answers like the ones it was fitted on. Not in TypeSafe's
     #: SDK; ``None`` where it isn't known.
     temperature: float | None = None
+    #: The model that answered, as the server reported it, so a fitted
+    #: :class:`~decisions.Calibration` can refuse another model's answers
+    #: even at the same temperature. Not in TypeSafe's SDK; ``None`` where it
+    #: isn't known.
+    model: str | None = None
 
 
 @dataclass(frozen=True)

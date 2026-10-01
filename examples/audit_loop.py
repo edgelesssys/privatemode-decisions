@@ -8,9 +8,10 @@ on. Traffic changes, and the best temperature follows difficulty, so the
 guarantees have to be checked where they are used. The loop:
 
 1. Log every decision with its answer as ``system_one`` returned it: the
-   probabilities and the temperature they were reported at, before any task
-   calibration. A stored calibration refuses answers at another temperature
-   (a new model behind an alias, regenerated defaults), so refit then.
+   probabilities, the temperature they were reported at and the model that
+   answered (``answer.model``), before any task calibration. A stored
+   calibration refuses answers from another model (an alias that moved) or
+   at another temperature (regenerated defaults), so refit then.
 2. ``draw``: pick a **random** sample of logged decisions for a person to
    label. Not the escalated ones only: those are the hard cases, and a
    calibration fitted or checked on them promises nothing about the rest.
@@ -20,10 +21,10 @@ guarantees have to be checked where they are used. The loop:
    for the next round. Without a calibration yet, the first run fits one.
 
 The files are JSON lines. ``decisions.jsonl``: ``{"id": ..., "probabilities":
-{...}, "temperature": ...}`` per decision, as logged, oldest first. ``to_label.jsonl`` gets
-the drawn decisions; ``labels.jsonl`` holds ``{"id": ..., "label": ...}`` for
-the labelled ones. ``calibration.json`` holds the current calibration and
-is rewritten after a refit.
+{...}, "temperature": ..., "model": ...}`` per decision, as logged, oldest
+first. ``to_label.jsonl`` gets the drawn decisions; ``labels.jsonl`` holds
+``{"id": ..., "label": ...}`` for the labelled ones. ``calibration.json``
+holds the current calibration and is rewritten after a refit.
 """
 
 from __future__ import annotations
@@ -38,7 +39,8 @@ from pathlib import Path
 from decisions import Calibration, ChoiceAnswer, calibrate, evaluate
 from decisions.calibration import rescale
 
-COVERAGE = 0.9      # for a first fit; afterwards the stored calibration's own
+#: For a first fit; afterwards the stored calibration's own are kept.
+COVERAGE = 0.9
 MAX_ERROR = 0.05
 #: Labels per audit. A few hundred make coverage and the error bound
 #: reliable; with 100, a 90% target lands between 85% and 95%.
@@ -53,7 +55,7 @@ def answer(decision: dict) -> ChoiceAnswer:
     probabilities = decision["probabilities"]
     return ChoiceAnswer(choice=max(probabilities, key=probabilities.get),
                         probabilities=probabilities, confidence=0.0,
-                        temperature=decision.get("temperature"))
+                        temperature=decision.get("temperature"), model=decision.get("model"))
 
 
 def save(calibration: Calibration, path: Path) -> None:
@@ -66,10 +68,14 @@ def restore(path: Path) -> Calibration:
 
 def at_one_temperature(answers: list[ChoiceAnswer], target: float | None) -> list[ChoiceAnswer]:
     """The answers at the temperature of the newest decision. A sample that
-    spans a change of default (a regenerated constant, a moved alias) mixes
-    temperatures, which ``calibrate()`` refuses; temperatures compose, so
-    each answer is rescaled by ``target / its own``."""
+    spans a regenerated default mixes temperatures of one model, which
+    ``calibrate()`` refuses; temperatures compose, so each answer is
+    rescaled by ``target / its own``. (Answers from another model are
+    dropped before this: rescaling can't turn them into this model's.)"""
     if target is None:
+        if len({a.temperature for a in answers}) > 1:
+            raise SystemExit("the labelled answers are at different temperatures and the "
+                             "newest decision has none logged; log the temperature")
         return answers
     return [a if a.temperature in (None, target)
             else replace(rescale(a, target / a.temperature), temperature=target)
@@ -101,9 +107,23 @@ def check(decisions_path: Path, labels_path: Path, calibration_path: Path) -> No
     decisions = {d["id"]: d for d in logged}
     labelled = [(decisions[row["id"]], row["label"]) for row in load(labels_path)
                 if row["id"] in decisions]
+    # Refit only on the model that answers now: after an alias moved, the
+    # older model's answers say nothing about the new one.
+    model = logged[-1].get("model") if logged else None
+    if model is not None:
+        kept = [(d, label) for d, label in labelled if d.get("model") in (None, model)]
+        if len(kept) < len(labelled):
+            print(f"{len(labelled) - len(kept)} labelled decisions are from another model "
+                  f"than {model}; left out")
+        labelled = kept
+    if not labelled:
+        raise SystemExit("no labelled decisions from the current model")
     answers = [answer(d) for d, _ in labelled]
     newest = logged[-1].get("temperature") if logged else None
     labels = [label for _, label in labelled]
+    unknown = sorted({label for label in labels} - set(answers[0].probabilities))
+    if unknown:
+        raise SystemExit(f"labels {unknown} are not options of these decisions; fix the labels")
     coverage, max_error = COVERAGE, MAX_ERROR
     if calibration_path.exists():
         current = restore(calibration_path)

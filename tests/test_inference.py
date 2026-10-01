@@ -186,6 +186,7 @@ def test_the_default_temperature_follows_the_model_that_answered():
         engine.oracle._indexes[PREFIX] = {"ids": INDEX_IDS, "exhausted": True}
         response = engine.system_one("state", {"q": question(4)})
         assert response.model == model                  # the model that answered, not the alias
+        assert response.answers["q"].model == model     # and on each answer, for Calibration
         return response.answers["q"].temperature
 
     family = None

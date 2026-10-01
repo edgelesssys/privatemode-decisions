@@ -325,8 +325,9 @@ def test_temperature_must_be_a_positive_finite_number(bad):
 
 
 def test_extreme_logits_stay_within_the_searched_temperatures():
-    """Near one-hot answers with many exact zeros once drove the joint fit's
-    line search to exp overflow."""
+    """Near one-hot answers with many exact zeros: the joint fit's
+    temperature was unbounded (T = 264 here) and, on worse inputs, its line
+    search overflowed exp()."""
     from decisions.types import ChoiceAnswer
 
     rng = random.Random(24)
@@ -388,3 +389,22 @@ def test_the_conformal_cutoff_needs_nine_scores_at_ninety_percent(n, expected):
 
     scores = [i / 10 for i in range(1, n + 1)]      # 0.1 ... 0.n
     assert _cutoff(scores, 0.9) == pytest.approx(expected)
+
+
+def test_a_calibration_refuses_another_models_answers():
+    """Same temperature, another model (an alias that moved between two
+    unmeasured models): only the recorded model tells them apart."""
+    from dataclasses import replace
+
+    answers, labels = biased_sample(100, seed=26)
+    fitted = calibrate([replace(a, model="model-a") for a in answers], labels)
+    assert fitted.model == "model-a"
+    fitted.apply(replace(answers[0], model="model-a"))
+    fitted.apply(answers[0])                              # unknown model: not refused
+    with pytest.raises(ValueError, match="alias moved"):
+        fitted.apply(replace(answers[0], model="model-b"))
+    with pytest.raises(ValueError, match="different models"):
+        calibrate([replace(a, model="model-a" if i % 2 else "model-b")
+                   for i, a in enumerate(answers)], labels)
+    from decisions import Calibration
+    assert Calibration.from_dict(fitted.to_dict()).model == "model-a"

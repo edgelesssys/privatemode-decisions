@@ -359,7 +359,8 @@ class Calibration:
     they are in every set.
 
     A calibration is relative to the answers it was fitted on: ``options``
-    are their option names in order, and ``base_temperature`` the
+    are their option names in order, ``model`` the model that gave them
+    (``ChoiceAnswer.model``), and ``base_temperature`` the
     temperature they already had (``ChoiceAnswer.temperature``; for
     :class:`~decisions.SystemOne` answers the model's default, which depends
     on the model and the number of options). Applying it to an answer with
@@ -377,6 +378,7 @@ class Calibration:
     bias: Mapping[str, float] = field(default_factory=dict)
     options: tuple[str, ...] = ()
     base_temperature: float | None = None
+    model: str | None = None
 
     def __post_init__(self) -> None:
         # Read back from JSON, these arrive as lists.
@@ -401,10 +403,13 @@ class Calibration:
 
     def check(self, answer: ChoiceAnswer) -> None:
         """Raise ``ValueError`` if the answer isn't like the ones this
-        calibration was fitted on (options, or the temperature it has)."""
+        calibration was fitted on (options, model, or the temperature it has)."""
         if self.options and tuple(answer.probabilities) != self.options:
             raise ValueError(f"calibrated for the options {list(self.options)}, "
                              f"but the answer has {list(answer.probabilities)}")
+        if self.model is not None and answer.model is not None and answer.model != self.model:
+            raise ValueError(f"calibrated on answers from {self.model}, but this one is from "
+                             f"{answer.model}: the alias moved; refit with calibrate()")
         if (self.base_temperature is not None and answer.temperature is not None
                 and not math.isclose(answer.temperature, self.base_temperature, rel_tol=1e-9)):
             raise ValueError(
@@ -590,6 +595,10 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
         raise ValueError(f"the answers are at different temperatures {sorted(temperatures)}; "
                          "calibrate answers from one model and one temperature setting")
     base = next(iter(temperatures), None)
+    models = {a.model for a in answers if a.model is not None}
+    if len(models) > 1:
+        raise ValueError(f"the answers are from different models {sorted(models)}; "
+                         "calibrate answers from one model")
     offsets: dict[str, float] = {}
     # Too few labels to fit a bias and still hold answers out of it.
     if bias and len(answers) >= MIN_BIAS_LABELS:
@@ -618,7 +627,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
     return Calibration(temperature=temperature, cutoffs=cutoffs, coverage=coverage,
                        examples=len(scaled), threshold=threshold, max_error=max_error,
                        always_included=always, bias=offsets,
-                       options=options, base_temperature=base)
+                       options=options, base_temperature=base,
+                       model=next(iter(models), None))
 
 
 def evaluate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
