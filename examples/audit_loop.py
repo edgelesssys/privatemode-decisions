@@ -108,13 +108,15 @@ def check(decisions_path: Path, labels_path: Path, calibration_path: Path) -> No
     labelled = [(decisions[row["id"]], row["label"]) for row in load(labels_path)
                 if row["id"] in decisions]
     # Refit only on the model that answers now: after an alias moved, the
-    # older model's answers say nothing about the new one.
+    # older model's answers say nothing about the new one. Decisions logged
+    # without a model (before it was logged) could be from any model, so
+    # they go too once the newest decision names one.
     model = logged[-1].get("model") if logged else None
     if model is not None:
-        kept = [(d, label) for d, label in labelled if d.get("model") in (None, model)]
+        kept = [(d, label) for d, label in labelled if d.get("model") == model]
         if len(kept) < len(labelled):
             print(f"{len(labelled) - len(kept)} labelled decisions are from another model "
-                  f"than {model}; left out")
+                  f"than {model}, or don't say; left out")
         labelled = kept
     if not labelled:
         raise SystemExit("no labelled decisions from the current model")

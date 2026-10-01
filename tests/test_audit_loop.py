@@ -93,3 +93,19 @@ def test_mixed_temperatures_without_a_newest_one_stop_the_refit(tmp_path):
     labelled = write(tmp_path / "labels.jsonl", [{"id": i, "label": y} for i, y in enumerate(labels)])
     with pytest.raises(SystemExit, match="different temperatures"):
         audit_loop.check(decisions, labelled, tmp_path / "calibration.json")
+
+
+def test_decisions_logged_without_a_model_are_left_out_once_it_is_logged(tmp_path, capsys):
+    """Log lines from before the upgrade name no model and could be from an
+    older one behind the alias: the refit after the upgrade leaves them out."""
+    answers, labels = biased_sample(300, seed=30)
+    rows = logged(answers, [2.0] * 300)
+    for i, row in enumerate(rows):
+        if i >= 100:
+            row["model"] = "new-model"
+    decisions = write(tmp_path / "decisions.jsonl", rows)
+    labelled = write(tmp_path / "labels.jsonl", [{"id": i, "label": y} for i, y in enumerate(labels)])
+    audit_loop.check(decisions, labelled, tmp_path / "calibration.json")
+    assert "100 labelled decisions are from another model than new-model, or don't say" in capsys.readouterr().out
+    fitted = audit_loop.restore(tmp_path / "calibration.json")
+    assert fitted.model == "new-model" and fitted.examples == 200
