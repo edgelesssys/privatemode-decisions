@@ -12,7 +12,7 @@ import math
 import pytest
 
 from decisions import APIError, Choice, SystemOne
-from decisions.inference import MAX_LOGPROB_TOKEN_IDS, PREFIX, batches
+from decisions.inference import MAX_LOGPROB_TOKEN_IDS, PREAMBLE, PREFIX, batches
 
 INDEX_IDS = list(range(1000, 1191))  # 191 single-token indexes, like GLM-5.3-Flash
 
@@ -130,7 +130,8 @@ def test_no_top_logprobs_is_an_error():
 def sent_names(payload: dict) -> list[str]:
     """The option names in the order a request sent them."""
     text = payload["messages"][0]["content"]
-    return [o["label"] for o in json.loads(text[text.index("{"):])["options"]]
+    # The last line holds the state and the question, in either layout.
+    return [o["label"] for o in json.loads(text.rsplit("\n", 1)[-1])["options"]]
 
 
 def test_permutations_follow_the_option_not_the_position():
@@ -212,3 +213,128 @@ def test_option_mass_sums_the_options_before_the_mask(options):
     expected = math.fsum(math.exp(logprob(i)) for i in INDEX_IDS[:options])
     assert answer.option_mass == pytest.approx(expected)
     assert 0 < answer.option_mass < 1
+
+
+def test_the_question_comes_before_the_state_by_default():
+    engine, server = make_engine()
+    q = question(3)
+    engine.system_one({"text": "hi"}, {"q": q})
+    whole = json.dumps({"state": {"text": "hi"}, **SystemOne._question(q)}, ensure_ascii=False)
+    assert server.payloads[-1]["messages"][0]["content"] == (
+        PREAMBLE + SystemOne._question_text(q) + "\n" + whole)
+    assert server.payloads[-1]["messages"][1]["content"] == PREFIX
+    # With one question, "cost" is the same prompt.
+    engine.system_one({"text": "hi"}, {"q": q}, optimize="cost")
+    assert server.payloads[-1] == server.payloads[-2]
+
+
+def test_the_lead_keeps_images_first_and_works_with_history():
+    engine, server = make_engine()
+    q = question(2)
+    engine.system_one("state", {"q": q}, images="data:image/png;base64,AA==")
+    content = server.payloads[-1]["messages"][0]["content"]
+    assert content[0]["type"] == "image_url"
+    assert content[-1]["text"].startswith(PREAMBLE + SystemOne._question_text(q) + "\n")
+    engine.system_one("state", {"q": q}, history="earlier decisions")
+    before = server.payloads[-1]["messages"][0]["content"][0]["text"]
+    assert before.startswith(PREAMBLE + SystemOne._question_text(q) + "\n")
+    assert before.endswith("earlier decisions")
+
+
+@pytest.mark.parametrize("engine_kw, call_kw", [({"optimize": "cost"}, {}), ({}, {"optimize": "cost"})])
+def test_cost_leads_every_request_with_all_questions(engine_kw, call_kw):
+    engine, server = make_engine(**engine_kw)
+    questions = {"a": question(2), "b": Choice({"x": None, "y": None, "z": None}, instructions="Which?")}
+    engine.system_one("state", questions, mode="sequential", **call_kw)
+    block = "".join(SystemOne._question_text(q) + "\n" for q in questions.values())
+    texts = [p["messages"][0]["content"] for p in server.payloads]
+    assert len(texts) == 2
+    assert all(t.startswith(PREAMBLE + block + '{"state": "state"') for t in texts)
+    # Each request still ends with the question it asks.
+    assert [sent_names(p) for p in server.payloads] == [list(q.criteria) for q in questions.values()]
+
+
+def test_accuracy_leads_each_request_with_its_own_question_only():
+    engine, server = make_engine()
+    questions = {"a": question(2), "b": Choice({"x": None, "y": None}, instructions="Which?")}
+    engine.system_one("state", questions, mode="sequential")
+    for payload, q in zip(server.payloads, questions.values()):
+        assert payload["messages"][0]["content"].startswith(
+            PREAMBLE + SystemOne._question_text(q) + '\n{"state"')
+
+
+def split_prompt(payload: dict) -> tuple[list[dict], dict]:
+    """The lead's questions and the asked question of one request."""
+    lines = payload["messages"][0]["content"].removeprefix(PREAMBLE).split("\n")
+    return [json.loads(line) for line in lines[:-1]], json.loads(lines[-1])
+
+
+@pytest.mark.parametrize("optimize", ["accuracy", "cost"])
+def test_the_lead_numbers_options_as_the_rotated_request_does(optimize):
+    """With several option orders, the asked question's lead entry must use
+    the order of its request: two maps from number to label in one prompt
+    would leave the decode following one of them silently."""
+    engine, server = make_engine(optimize=optimize)
+    questions = {"a": Choice({f"a{i}": None for i in range(4)}, instructions="First?"),
+                 "b": Choice({"x": None, "y": None}, instructions="Second?")}
+    engine.system_one("state", questions, permutations=3, mode="sequential")
+    assert len(server.payloads) == 3 + 2            # b has two options: two orders
+    leads = set()
+    for payload in server.payloads:
+        lead, asked = split_prompt(payload)
+        entry = [q for q in lead if q["question"] == asked["question"]]
+        assert len(entry) == 1 and entry[0]["options"] == asked["options"]
+        assert len(lead) == (1 if optimize == "accuracy" else 2)
+        leads.add(json.dumps(lead))
+    if optimize == "cost":
+        # Requests in the same order share the block: one per order.
+        assert len(leads) == 3
+
+
+def test_optimize_takes_only_the_two_layouts():
+    for bad in (True, False, "own", "all"):
+        with pytest.raises(ValueError):
+            make_engine(optimize=bad)
+    engine, _ = make_engine()
+    with pytest.raises(ValueError):
+        engine.system_one("state", {"q": question(2)}, optimize="first")
+
+
+@pytest.mark.parametrize("kwargs, mode", [
+    ({}, "parallel"),                                    # only the preamble is shared
+    ({"optimize": "cost"}, "staged"),
+    ({"images": "data:image/png;base64,AA=="}, "staged"),
+    ({"history": "earlier decisions"}, "staged"),
+    ({"history": {"a": "earlier decisions"}}, "parallel"),  # a record per request
+    ({"mode": "sequential"}, "sequential"),              # as asked
+])
+def test_staged_only_when_the_requests_share_more_than_the_preamble(kwargs, mode):
+    engine, _ = make_engine()
+    questions = {"a": question(2), "b": Choice({"x": None, "y": None}, instructions="Which?")}
+    assert engine.system_one("state", questions, **kwargs).timings["mode"] == mode
+
+
+def test_a_history_is_led_by_every_question_so_the_record_is_shared():
+    """With the default layout, each request leading with its own question
+    would put a different prefix in front of the record for every question."""
+    engine, server = make_engine()
+    questions = {"a": question(2), "b": Choice({"x": None, "y": None}, instructions="Which?")}
+    engine.system_one("state", questions, history="earlier decisions",
+                      optimize="accuracy", mode="sequential")
+    block = "".join(SystemOne._question_text(q) + "\n" for q in questions.values())
+    befores = [p["messages"][0]["content"][0]["text"] for p in server.payloads]
+    assert befores[0] == befores[1]
+    assert befores[0].startswith(PREAMBLE + block) and befores[0].endswith("earlier decisions")
+
+
+def test_a_history_per_question_is_led_by_its_own_question():
+    """No two requests share a record from a mapping, so the whole block
+    would cache nothing more."""
+    engine, server = make_engine()
+    a, b = question(2), Choice({"x": None, "y": None}, instructions="Which?")
+    engine.system_one("state", {"a": a, "b": b}, history={"a": "earlier decisions"},
+                      mode="sequential")
+    texts = [p["messages"][0]["content"] for p in server.payloads]
+    assert texts[0][0]["text"] == (PREAMBLE + SystemOne._question_text(a) + "\n"
+                                   + '{"state": "state"}\n\nearlier decisions')
+    assert texts[1].startswith(PREAMBLE + SystemOne._question_text(b) + '\n{"state"')
