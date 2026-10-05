@@ -27,9 +27,9 @@ reference.
 
 1. **Number the options in order, and ask the question first.** The user
    message is `PREAMBLE`, then one line of JSON with `question` and
-   `options` (the asked question, or with `optimize="cost"` or one
-   history for the call every question of the call), then JSON with
-   `state`, `question` and `options` for the question asked. Each option
+   `options` (the asked question, or with the `"cost"` layout every
+   question of the call), then JSON with `state`, `question` and
+   `options` for the question asked. Each option
    is `{"number": i, "label": ..., "description": ...}`, where `i` is its
    position in this request; with rotated orders, number every question
    in the lead in the request's order too, or one prompt carries two
@@ -97,8 +97,8 @@ reference.
   `permutations=k` asks in `k` rotated orders and averages. Rotations keep
   scales in order and results deterministic.
 - vLLM's prefix cache only reuses what requests share up front, and
-  Privatemode only caches prefixes of about 2,300 tokens and more. The
-  default `optimize="accuracy"` leads each request with its own question
+  Privatemode only caches prefixes of about 2,300 tokens and more.
+  `optimize="accuracy"` leads each request with its own question
   and shares only the preamble (and images). `optimize="cost"` leads every
   request with all of the call's questions, then the state: the requests
   of a call (per option order) share everything up to the question asked,
@@ -107,10 +107,10 @@ reference.
   layout on 2,000-token states (59% cached); on short states it is the
   slower one. `mode="staged"` sends one question first to seat the prefix,
   then the rest in parallel; it is the default only when the requests
-  share more than the preamble (`"cost"`, images, one history for the
-  call), since otherwise it just adds a round trip. One history for the
-  call implies the whole question block in front of it, so the record
-  stays shareable; a history per question doesn't.
+  share more than the preamble (`"cost"`, or images in front of every
+  request), since otherwise it just adds a round trip. Unset, `optimize`
+  is `"cost"` with one history for the call, so the record stays
+  shareable, and `"accuracy"` otherwise.
 - At most `MAX_IN_FLIGHT` (9) requests are in flight per process. Raise it
   deliberately with `decisions.client.set_max_in_flight`.
 

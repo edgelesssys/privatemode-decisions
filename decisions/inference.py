@@ -117,8 +117,8 @@ def _as_sequence(images: Any) -> tuple:
     return tuple(images)
 
 
-def _check_optimize(optimize: str) -> str:
-    if optimize not in OPTIMIZE:
+def _check_optimize(optimize: str | None) -> str | None:
+    if optimize is not None and optimize not in OPTIMIZE:
         raise ValueError(f"optimize must be one of {OPTIMIZE}")
     return optimize
 
@@ -129,7 +129,7 @@ class SystemOne:
                  permutations: int = 1,
                  max_logprob_ids: int = MAX_LOGPROB_TOKEN_IDS,
                  temperature: float | str | None = None,
-                 optimize: str = "accuracy",
+                 optimize: str | None = None,
                  extra_body: dict[str, Any] | None = None) -> None:
         self.client, self.model = client, model
         #: How the questions lead the prompt. Either way the question and its
@@ -137,17 +137,15 @@ class SystemOne:
         #: causal mask the state is otherwise read before the model knows
         #: what is asked about it.
         #:
-        #: ``"accuracy"`` (default): each request leads with its own question,
+        #: ``"accuracy"``: each request leads with its own question,
         #: ``[preamble + question] [state + question]``. ``"cost"``: each
         #: request leads with every question of the call,
         #: ``[preamble + questions] [state + question]``, so the requests of
         #: a call share everything up to the state, and calls with the same
-        #: questions share the block. That pays off only where the server
-        #: caches the state (Privatemode: prefixes of about 2,300 tokens and
-        #: more); otherwise it sends N question blocks per request for
-        #: nothing. With one question per call the two are the same. A
-        #: history shared by the call's requests always gets the ``"cost"``
-        #: layout. Measurements are in the README.
+        #: questions share the block; see the README for when that pays off.
+        #: With one question per call the two are the same. ``None``
+        #: (default): ``"cost"`` with one history for the call (see
+        #: :meth:`_content`), else ``"accuracy"``.
         self.optimize = _check_optimize(optimize)
         #: Divides the option log probabilities before they are reported.
         #: ``None`` takes the benchmark's value for this model from each
@@ -204,11 +202,14 @@ class SystemOne:
         Each call then prefills the new part of the record, the images and
         the question, and the rest of the record is a cache hit -- as long
         as the lead in front of it stays the same. So with one history for
-        the whole call the lead is every question of the call, whatever
-        :attr:`optimize` says: the record is then shared by all of a call's
+        the whole call the lead is by default every question of the call:
+        the record is then shared by all of a call's
         requests and by later calls with the same questions. A history per
         question is its request's alone, and its own question leads it just
-        as stably. ``history=None`` keeps the default layout; an empty
+        as stably. An explicit ``optimize="accuracy"`` keeps each request's
+        own question in front of a single history too, at the price of
+        sharing the record only between calls, per question.
+        ``history=None`` keeps the default layout; an empty
         string selects the history layout with nothing in it.
         """
         if history is None:
@@ -332,9 +333,9 @@ class SystemOne:
 
         ``history`` is text that accumulates across calls, such as a log of
         earlier decisions. Supplying it moves the prompt to
-        ``[questions + state + history][images][question]``, with every
-        question of the call leading, so that the history is the part the
-        prefix cache keeps between calls; see :meth:`_content`.
+        ``[questions + state + history][images][question]``, by default
+        with every question of the call leading, so that the history is the
+        part the prefix cache keeps between calls; see :meth:`_content`.
         It may also be a **mapping from question id to history**, because
         not every question benefits: one about what an image shows can be
         distracted by a long record of earlier decisions. Each question is
@@ -349,12 +350,10 @@ class SystemOne:
         client's ``MAX_IN_FLIGHT`` ceiling.
 
         ``optimize`` (``"accuracy"`` or ``"cost"``) overrides the engine's
-        setting for this call; see :attr:`optimize`. A single history
-        overrides it: every question leads, as with ``"cost"`` and at its
-        accuracy. ``mode`` (see the module docstring) defaults to
-        ``"staged"`` when the requests share more than the preamble
-        (``"cost"``, images or a single history) and to ``"parallel"``
-        otherwise.
+        setting for this call; see :attr:`optimize`. ``mode`` (see the
+        module docstring) defaults to ``"staged"`` when the requests share
+        more than the preamble (the ``"cost"`` layout, or images in front of
+        every request) and to ``"parallel"`` otherwise.
         """
         if state is None:
             raise ValueError("state is missing")
@@ -392,7 +391,8 @@ class SystemOne:
         # MAX_LOGPROB_TOKEN_IDS options, this is exactly one request per
         # question.
         count = self.permutations if permutations is None else max(1, int(permutations))
-        layout = self.optimize if optimize is None else _check_optimize(optimize)
+        layout = (_check_optimize(optimize) or self.optimize
+                  or ("cost" if isinstance(history, str) else "accuracy"))
         # Every question in every option order it is asked in: rotated[key][r].
         rotated: dict[str, list[Choice]] = {}
         for key in keys:
@@ -403,16 +403,19 @@ class SystemOne:
                             for order in rotations(len(names), count)]
         orders = {key: len(rotated[key]) for key in keys}
 
-        # A history is shared with later calls only if what precedes it is:
-        # with one record for all requests, every question of the call leads,
-        # as with "cost", rather than each request's own one, which would
-        # re-prefill the record per question. A record per question is not
-        # shared between requests, so its own question leads it.
-        whole_block = layout == "cost" or isinstance(history, str)
+        whole_block = layout == "cost"
+
+        def history_for(key: str) -> str | None:
+            if isinstance(history, Mapping):
+                return history.get(key)
+            return history
+
         # Seat a shared prefix first only when the requests share more than
-        # the preamble; otherwise "staged" just adds a round trip.
+        # the preamble; otherwise "staged" just adds a round trip. Images
+        # lead only a request without a history.
         if mode is None:
-            mode = "staged" if whole_block or urls else "parallel"
+            images_lead = urls and all(history_for(key) is None for key in keys)
+            mode = "staged" if whole_block or images_lead else "parallel"
 
         def lead(key: str, r: int) -> str:
             """The question block of the request for ``key`` in order ``r``.
@@ -430,11 +433,6 @@ class SystemOne:
             for key in keys for r, asked in enumerate(rotated[key])]
         requests = [(number, read) for number, (_, _, _, allowed) in enumerate(units)
                     for read in batches(allowed, self.max_logprob_ids)]
-
-        def history_for(key: str) -> str | None:
-            if isinstance(history, Mapping):
-                return history.get(key)
-            return history
 
         def run(request: tuple[int, list[int]]) -> tuple[int, list[int], dict, float]:
             number, read = request

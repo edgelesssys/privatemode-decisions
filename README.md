@@ -55,14 +55,16 @@ to 500 per dataset):
 |---|---|---|
 | Datasets it can answer | 29 | 28 |
 | Mean accuracy, the 28 datasets Jev answers | **0.798** | 0.775 |
-| Median latency, from Germany | about 150 ms | 251 ms |
+| Median latency, from Germany | about 150 ms³ | 251 ms |
 | EUR per 1,000 decisions | 0.095 | 0.016 |
-| Calibration error without labels (excess ECE) | **0.032** | 0.080 |
+| Calibration error without labels (excess ECE) | **0.032**³ | 0.080 |
+
+³ Measured with the state-first prompt, before the question also led it.
 
 On the same examples Privatemode Decisions is ahead of Jev on 16
 datasets, tied on 8 and behind on 3 (Wilcoxon p = 0.001). Jev can't read
-images. Our calibration error is the state-first prompt's, with the
-default temperature formula fitted without the dataset at hand. The
+images. Our calibration error uses the default temperature formula
+fitted without the dataset at hand. The
 shipped temperatures, fitted on all datasets, give 0.016 with the current
 prompt against 0.023 with state first. Jev's is as returned (0.040 with a
 default temperature of its own). Methodology and full results:
@@ -144,11 +146,11 @@ with `mode="staged"`):
 | `"cost"` | +0.9 points | 530 ms | **670 ms, 59%** |
 
 With one `history=` string for the call (a record that grows across
-calls) every question leads, whatever `optimize` says, so the record is
-shared by the call's requests and by later calls with the same
-questions; that is the `"cost"` layout and its accuracy. A history per
-question (a mapping) is its request's alone, so there its own question
-leads.
+calls) `optimize` defaults to `"cost"`, so the record is shared by the
+call's requests and by later calls with the same questions;
+`optimize="accuracy"` keeps the more accurate layout and shares the
+record per question only. A history per question (a mapping) is its
+request's alone, so there its own question leads by default.
 
 ## Calibration
 
@@ -227,8 +229,8 @@ tests/           everything above against fakes
   the prompt tokens; MMLU-Pro drops from 63.1% to 61.9%. The default
   temperatures still fit.
 - `optimize="accuracy"` (default) leads each request with its own question;
-  `"cost"` with all of the call's, for a cacheable prefix. One history for
-  all questions always gets the whole block. `mode` defaults to parallel
+  `"cost"` with all of the call's, for a cacheable prefix. Unset, it is
+  `"cost"` with one history for all questions. `mode` defaults to parallel
   unless the requests share more than the preamble. The state-first
   prompt is gone; `ae35442` reproduces its results.
 
