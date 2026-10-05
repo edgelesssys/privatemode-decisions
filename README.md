@@ -35,11 +35,16 @@ and up to 1,000 examples each.
 | Normalized accuracy | 0.585 | 0.574 | 0.422 |
 | Median latency, from Germany | 152 ms | 251 ms | runs locally |
 | EUR per 1,000 decisions | 0.062 | 0.016 | runs locally |
+| Calibration error without labels (excess ECE) | 0.032 | 0.080 | not measured |
 
 Normalized accuracy is 0 for always guessing a dataset's most common label
 and 1 for getting everything right, averaged across datasets. On the 28
 datasets both can answer, Privatemode Decisions and Jev are statistically
 indistinguishable. Jev can't read images, and Laya can't fit 151 options.
+The calibration error is what remains after the library's default
+temperature, beyond what sampling alone produces (0 is as calibrated as the
+test sets can show); Jev's is for its probabilities as returned, and 0.040
+if it gets a default temperature fitted the same way.
 Full results and methodology are in
 [privatemode-decisions-benchmark](https://github.com/edgelesssys/privatemode-decisions-benchmark).
 
@@ -82,12 +87,21 @@ Full results and methodology are in
    )
    answer = result.answers["team"]
    print(answer.choice, answer.probabilities, answer.confidence)
-   # payments {'payments': 0.997, 'technical': 0.002, 'complaints': 0.0} 0.98
+   # payments {'payments': 0.957, 'technical': 0.033, 'complaints': 0.01} 0.82
    ```
+
+The probabilities are calibrated by default: for the models we measured,
+the library divides the log probabilities by a pre-configured temperature
+before reporting them (see [Calibration](#calibration)).
 
 `confidence` ranges from 0 (probability spread evenly) to 1 (all of it on
 one option). It measures how sure the model is, not whether it's right,
-and works as a threshold for sending answers to human review. To include
+and works as a threshold for sending answers to human review; see
+[Calibration](#calibration) for how far the probabilities can be trusted.
+`result.model` is the model that answered, not the name you asked for: an
+alias such as `glm-flash-latest` comes back as `glm-5.3-flash`. Log it with
+each decision to see when an alias moves.
+To include
 images, pass `images=` with paths, bytes, Pillow images or data URLs, and
 use a vision model such as `glm-flash-latest`.
 
@@ -99,7 +113,7 @@ get right.
 ## How it works
 
 The prompt numbers the options. The assistant's reply is prefilled with
-`answer:`, so the next token the model generates is the number of its
+`answer=`, so the next token the model generates is the number of its
 choice. The request restricts generation to those tokens and returns their
 log probabilities. The library turns them into probabilities that sum to 1
 across your options.
@@ -111,6 +125,104 @@ them for ten minutes per model. The cache expires because an alias such as
 
 Because the probabilities cover only your options, the model can't answer
 "none of these". Add it as an option if you need it.
+
+## Calibration
+
+Raw probabilities from one token are overconfident: on the benchmark,
+confidence exceeded accuracy by 15 points on average. So the library
+softens them by default, with a temperature that depends on the number of
+options, measured per model: GLM-5.3-Flash, Kimi K2.6 and GLM-5.3 (and
+their `-latest` aliases). That removes most of the gap without any labels;
+other models keep their raw probabilities until they're measured. GLM-5.3
+puts only about two thirds of its probability on the options after
+`answer=`, so its answers are less reliable than Flash's or Kimi's.
+
+- `SystemOne(..., temperature="sentiment")` uses the temperature for a
+  task family (`intent`, `legal`, `moderation`, `nli`, `qa`, `sentiment`,
+  `topic`), which fits better if you know what kind of task it is.
+  `temperature=1` gives the raw probabilities.
+- With labelled answers from a random sample of your inputs, `calibrate()`
+  fits your task: a temperature and a bias per option, which corrects a
+  model that favours some options and so changes answers (+2.0 points of
+  accuracy from 100 labels on the benchmark, +1.0 from 20, +3.0 from 500).
+  It also gives two guarantees:
+
+  ```python
+  from decisions import calibrate
+
+  calibration = calibrate(answers, labels, coverage=0.9, max_error=0.05)
+  calibration.apply(new_answer).choice  # the corrected answer: use this one
+  calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
+  calibration.automate(new_answer)      # True: act on it; errors among these stay at most 5%
+  ```
+
+  `predict_set` contains the right option 90% of the time; with
+  `per_class=True` that holds for every option, which matters when one is
+  rare; an option with fewer than 9 labels (at 90%) is then in every set.
+  `automate` acts on answers whose top probability (after the
+  correction) clears a fitted threshold, and keeps the error among them at
+  most 5% with probability 90% over the choice of labels. That is the top
+  probability, not `answer.confidence`, which measures how peaked the whole
+  distribution is. A few hundred labels make both reliable, and a guarantee
+  costs automation: on the benchmark, a 5% error bound let about a fifth of
+  answers through, 10% about a third. `bias=False` fits the temperature
+  alone, which never changes an answer and automates a little more (27%
+  instead of 23% at a 10% bound with 100 labels). Label a random sample,
+  not only escalated cases.
+- `evaluate(answers, labels, calibration=...)` reports accuracy, ECE,
+  coverage and the error among automated answers, for a fresh audit sample:
+  refit with `calibrate()` when they drift.
+  [examples/audit_loop.py](examples/audit_loop.py) is such a loop.
+- `SystemOne(permutations=k)` asks in k option orders and averages. It keeps
+  the one-order default temperature, which measured as good as any other
+  choice without labels, and it didn't raise accuracy on the benchmark.
+
+**Which guarantee holds when.** The prediction sets cover the right option
+at the stated rate *on average over new inputs drawn like the labelled
+ones* (exchangeability); with `per_class=True`, for each option separately.
+The error bound on automated answers follows Learn then Test, but its
+candidate thresholds come from the labelled answers themselves rather than
+a grid fixed in advance, so its 90% over the choice of labels is tested on
+the benchmark, not proven. So is fitting the correction on the same labels
+as the cutoffs. For a temperature alone at most 1.1% of samples broke the
+bound (10% allowed); with a bias, cutoffs and threshold are set
+out-of-fold, and at most 1.1% did. Labels collected only from escalated or
+disputed cases break all of it.
+
+**Why calibration happens in the client.** The library receives the raw log
+probabilities and calibrates on your machine. You refit the temperature,
+bias, cutoffs and threshold on your own labels, and the labels never leave
+your infrastructure, which matters on a confidential-computing service.
+Services that return rounded or already-transformed probabilities only
+allow calibration stacked on top of their own transform: Jev rounds to 0.01
+and prices the right answer at exactly 0 in 4.3% of the benchmark's
+examples, so a temperature can't even be fitted without first patching the
+zeros.
+
+**What we tried and dropped.** Each was measured on the benchmark and
+didn't beat what the library does:
+
+- Dividing out the answer to a neutral input (contextual calibration): made
+  24 of 28 datasets worse, up to 16 points of accuracy; batch calibration
+  on unlabelled traffic cost 0.5 points on average. The bias they remove is
+  mostly real knowledge or the real class balance.
+- Averaging option orders (`permutations`) or a position prior (PriDe):
+  −0.3 points, not significant, for 4× the requests. Re-reading only
+  uncertain answers in more orders didn't help either, and a temperature
+  fitted per number of orders did worse than the one-order default.
+- Isotonic regression instead of a temperature: needs about 500 labels to
+  catch up. Predicting a task's temperature without labels (Thermometer
+  and similar): at most the gap from 0.032 to 0.006 excess ECE, half of
+  which 20 labels already close.
+- Clustered conformal sets for many options with few labels: no better than
+  one cutoff at a few labels per class.
+- Correcting answers by known class rates: needs rates as accurate as 100
+  labels would give, and hurts when they are off.
+- Probability left off the options (option mass): about 99% sits on the
+  options, right or wrong, so it says nothing about errors.
+
+The measurements, plots and method are in the benchmark's
+[calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).
 
 ## The web app
 

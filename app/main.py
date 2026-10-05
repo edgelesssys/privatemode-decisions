@@ -25,12 +25,14 @@ from .samples import SAMPLES
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
-# Models the proxy serves that answer a masked single token sensibly. The
-# first is the default: it is the one that also takes images.
+# Models the proxy serves that answer a masked single token sensibly: most of
+# their probability lands on the options after the answer= prefill (checked
+# with option_mass: Flash and Kimi 0.97-1.0, GLM 0.3-0.96). gpt-oss-120b puts
+# none there, so it isn't offered. The first is the default: it is the one
+# that also takes images.
 MODELS = [
     {"id": "glm-flash-latest", "label": "GLM flash (vision)", "vision": True},
     {"id": "glm-latest", "label": "GLM", "vision": False},
-    {"id": "gpt-oss-120b", "label": "gpt-oss 120B", "vision": False},
     {"id": "kimi-latest", "label": "Kimi (vision)", "vision": True},
 ]
 MAX_IMAGES = 6

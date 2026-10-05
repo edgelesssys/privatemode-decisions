@@ -38,6 +38,22 @@ class ChoiceAnswer:
     choice: str
     probabilities: dict[str, float]
     confidence: float
+    #: Probability the model put on the option tokens before the mask, out of
+    #: its whole vocabulary. Low means the model wanted to say something
+    #: else. It is for checking that the prompt fits a model, not a signal
+    #: about individual answers. Not in TypeSafe's SDK; ``None`` where it
+    #: isn't known.
+    option_mass: float | None = None
+    #: The calibration temperature the probabilities were divided by (1 for
+    #: raw), so a fitted :class:`~decisions.Calibration` can check it is
+    #: applied to answers like the ones it was fitted on. Not in TypeSafe's
+    #: SDK; ``None`` where it isn't known.
+    temperature: float | None = None
+    #: The model that answered, as the server reported it, so a fitted
+    #: :class:`~decisions.Calibration` can refuse another model's answers
+    #: even at the same temperature. Not in TypeSafe's SDK; ``None`` where it
+    #: isn't known.
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +73,8 @@ class Usage:
 
 @dataclass(frozen=True)
 class SystemOneResponse:
+    #: The model that answered, as the server reports it: an alias such as
+    #: ``glm-flash-latest`` comes back as the model it resolved to.
     model: str
     answers: dict[str, ChoiceAnswer]
     usage: Usage = field(default_factory=Usage)

@@ -29,12 +29,15 @@ reference.
    followed by JSON with `state`, `question` and `options`, each option as
    `{"number": i, "label": ..., "description": ...}`, where `i` is its
    position. Keep the mapping from number back to option.
-2. **Prefill the answer.** Append an assistant message `answer:` and send
+2. **Prefill the answer.** Append an assistant message `answer=` and send
    `continue_final_message: true` and `add_generation_prompt: false`.
    Without both, the model opens a new turn and the next token is
-   formatting, not a number.
+   formatting, not a number. End the prefill with a character the model
+   follows with a digit: after `answer:` it wants a space first, and chat
+   templates strip a trailing one, so the read would be conditioned on an
+   unlikely token (check that most probability lands on the options).
 3. **Get the number token IDs from the serving tokenizer.** `i` qualifies
-   when `answer:` + `str(i)` tokenizes as the tokens of `answer:` plus
+   when `answer=` + `str(i)` tokenizes as the tokens of `answer=` plus
    exactly one more; that token is the ID. Tokenize the prefixed string,
    not bare digits, and stop at the first `i` that doesn't fit. Don't assume
    one digit per token: GLM-5.3-Flash has single tokens for 0 to 190. Use
@@ -55,9 +58,26 @@ reference.
    There is no "none of these" signal unless it's an option.
 8. **Report confidence as what it is.** `1 - entropy / log(n)` measures
    how peaked the distribution is, not whether the answer is right.
+9. **Calibrate before trusting the numbers.** Raw probabilities are
+   overconfident.
+   - Divide the log probabilities by a temperature, by default the one
+     fitted per model in `decisions/calibration.py`. It never changes the
+     choice.
+   - With labels, also fit a bias per option (it changes answers), and set
+     conformal cutoffs and automation thresholds on out-of-fold
+     probabilities, not on the answers the bias was fitted to.
+   - For an error bound on automated answers, test thresholds in order
+     with an exact binomial test (Learn then Test style), never at the
+     point where the observed error equals the target.
+   - Don't divide out a neutral-input prior: it mostly removes real
+     knowledge.
 
 ## Limits
 
+- The prefill is tuned for GLM-5.3-Flash and fits Kimi K2.6 (all
+  probability on the options). GLM-5.3 wants a space after `answer=` about
+  half the time (option mass about 0.64); check the option mass before
+  adding a model.
 - Options are capped by the model's single-token numbers (191 on
   GLM-5.3-Flash); `system_one` raises `ValueError` beyond that.
 - Privatemode reports at most 128 IDs per response and rejects a longer
@@ -107,6 +127,11 @@ cp .env.example .env        # proxy URL and Privatemode API key
 - `decisions/` needs only the standard library (Pillow optionally, for
   resizing images). Keep it that way: no torch, no transformers, no HTTP
   client packages.
+- The default temperatures in `decisions/calibration.py` are generated:
+  run the benchmark's `bench.calibrate_report`, then
+  `python scripts/update_calibration.py <its constants.json>`. Don't edit
+  them by hand. The benchmark's parity tests check that its numpy
+  calibration code matches this library's.
 - `SystemOne`, `system_one()` and the types in `decisions/types.py` mirror
   TypeSafe's SDK so Jev code ports over. Don't rename them.
 - The tests need no model. A change to the request or decoding needs a

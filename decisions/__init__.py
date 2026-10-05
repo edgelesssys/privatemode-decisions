@@ -6,6 +6,7 @@ cannot load, download a tokenizer for, or reach with anything but an HTTP
 API.
 """
 
+from .calibration import Calibration, calibrate, evaluate
 from .client import APIError, OpenAIClient
 from .inference import PREFIX, SystemOne
 from .tokens import TokenOracle
@@ -14,6 +15,7 @@ from .types import Choice, ChoiceAnswer, SystemOneResponse, Usage
 __all__ = [
            "PREFIX",
            "APIError",
+           "Calibration",
            "Choice",
            "ChoiceAnswer",
            "OpenAIClient",
@@ -21,4 +23,6 @@ __all__ = [
            "SystemOneResponse",
            "TokenOracle",
            "Usage",
+           "calibrate",
+           "evaluate",
 ]

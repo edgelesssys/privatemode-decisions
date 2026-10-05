@@ -162,3 +162,53 @@ def test_a_position_prior_averages_out():
         for n, i in enumerate(payload["logprob_token_ids"])]}]}}]}, 0.01)
     result = engine.system_one("state", {"q": question(3)}, permutations=3)
     assert list(result.answers["q"].probabilities.values()) == pytest.approx([1 / 3] * 3)
+
+
+def test_answers_carry_the_temperature_they_were_reported_at():
+    engine, _ = make_engine(temperature=3.0)
+    assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 3.0
+    engine, _ = make_engine()                      # an unmeasured model stays raw
+    assert engine.system_one("state", {"q": question(3)}).answers["q"].temperature == 1.0
+
+
+def test_the_default_temperature_follows_the_model_that_answered():
+    from decisions.calibration import default_temperature
+
+    def serving(model):
+        server = FakeServer()
+        original = server.post
+
+        def post(path, payload):
+            body, elapsed = original(path, payload)
+            return dict(body, model=model), elapsed
+        server.post = post
+        engine = SystemOne(server, "glm-flash-latest", temperature=family)
+        engine.oracle._indexes[PREFIX] = {"ids": INDEX_IDS, "exhausted": True}
+        response = engine.system_one("state", {"q": question(4)})
+        assert response.model == model                  # the model that answered, not the alias
+        assert response.answers["q"].model == model     # and on each answer, for Calibration
+        return response.answers["q"].temperature
+
+    family = None
+    flash = default_temperature("glm-5.3-flash", 4)
+    assert serving("glm-5.3-flash") == pytest.approx(flash)          # the alias as measured
+    assert serving("kimi-k2.6") == pytest.approx(default_temperature("kimi-k2.6", 4))
+    assert serving("some-new-model") == 1.0                         # moved to an unmeasured model
+    # A task family follows the same rule: the served model's value for it,
+    # and raw once the alias has moved to a model without measurements.
+    family = "sentiment"
+    assert serving("glm-5.3-flash") == default_temperature("glm-5.3-flash", 4, "sentiment")
+    assert serving("kimi-k2.6") == default_temperature("kimi-k2.6", 4, "sentiment")
+    assert serving("some-new-model") == 1.0
+
+
+@pytest.mark.parametrize("options", [60, 151])
+def test_option_mass_sums_the_options_before_the_mask(options):
+    """One read, and two reads under one mask above 128 options: the mass
+    is the unmasked probability of all options, across both reads."""
+    engine, server = make_engine()
+    answer = engine.system_one("state", {"q": question(options)}).answers["q"]
+    assert len(server.payloads) == (1 if options <= MAX_LOGPROB_TOKEN_IDS else 2)
+    expected = math.fsum(math.exp(logprob(i)) for i in INDEX_IDS[:options])
+    assert answer.option_mass == pytest.approx(expected)
+    assert 0 < answer.option_mass < 1
