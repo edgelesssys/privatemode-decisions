@@ -25,10 +25,17 @@ Each point is a way a port silently returns plausible but wrong
 probabilities. `decisions/inference.py` and `decisions/tokens.py` are the
 reference.
 
-1. **Number the options in order.** The user message is `PREAMBLE`
-   followed by JSON with `state`, `question` and `options`, each option as
-   `{"number": i, "label": ..., "description": ...}`, where `i` is its
-   position. Keep the mapping from number back to option.
+1. **Number the options in order, and ask the question first.** The user
+   message is `PREAMBLE`, then one line of JSON with `question` and
+   `options` (the asked question, or with the `"cost"` layout every
+   question of the call), then JSON with `state`, `question` and
+   `options` for the question asked. Each option
+   is `{"number": i, "label": ..., "description": ...}`, where `i` is its
+   position in this request; with rotated orders, number every question
+   in the lead in the request's order too, or one prompt carries two
+   maps. Keep the mapping from number back to option. The question in
+   front lets the model read the state knowing what is asked: +1.6
+   points on the benchmark.
 2. **Prefill the answer.** Append an assistant message `answer=` and send
    `continue_final_message: true` and `add_generation_prompt: false`.
    Without both, the model opens a new turn and the next token is
@@ -89,9 +96,21 @@ reference.
 - A model can prefer a position regardless of the question.
   `permutations=k` asks in `k` rotated orders and averages. Rotations keep
   scales in order and results deterministic.
-- Put what's shared across questions first (preamble, state, images) so
-  vLLM's prefix cache reuses it. `mode="staged"` sends one question first
-  to seat the prefix, then the rest in parallel.
+- vLLM's prefix cache only reuses what requests share up front, and
+  Privatemode only caches prefixes of about 2,300 tokens and more.
+  `optimize="accuracy"` leads each request with its own question
+  and shares only the preamble (and images). `optimize="cost"` leads every
+  request with all of the call's questions, then the state: the requests
+  of a call (per option order) share everything up to the question asked,
+  and calls with the same questions share the block. With five questions
+  per state it gains less (+0.9 against +2.2 points) but was the faster
+  layout on 2,000-token states (59% cached); on short states it is the
+  slower one. `mode="staged"` sends one question first to seat the prefix,
+  then the rest in parallel; it is the default only when the requests
+  share more than the preamble (`"cost"`, or images in front of every
+  request), since otherwise it just adds a round trip. Unset, `optimize`
+  is `"cost"` with one history for the call, so the record stays
+  shareable, and `"accuracy"` otherwise.
 - At most `MAX_IN_FLIGHT` (9) requests are in flight per process. Raise it
   deliberately with `decisions.client.set_max_in_flight`.
 

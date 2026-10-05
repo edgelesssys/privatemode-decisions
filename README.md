@@ -1,51 +1,73 @@
 # Privatemode Decisions
 
-Ask an LLM to choose from a fixed set of options and get its choice plus a
-probability for each option. Each decision takes one forward pass and
-produces one token. No fine-tuning, no free text to parse. It works like
-TypeSafe's Jev, a System One model, but runs on GLM-5.3-Flash.
+Privatemode Decisions makes an LLM choose from a fixed set of options:
+you get its choice plus a calibrated probability for each option, from
+one forward pass and one token. No fine-tuning, no free text to parse.
+It works like TypeSafe's Jev but runs on GLM-5.3-Flash.
 
-- **Speed:** about 150 ms per decision, network included.
-- **Cost:** almost entirely input tokens, since the answer is one token.
-- **Context:** up to 1M tokens per decision.
-- **Images:** include screenshots, scans or photos alongside the text.
-- **Options:** up to 191 per question, with optional descriptions.
-- **Confidentiality:** on [Privatemode AI](https://privatemode.ai), your
-  data stays encrypted even while it's processed, and the deployment's
-  attestation is verified before anything is sent.
-- **Portability:** works with any vLLM-backed, OpenAI-compatible server,
-  without the confidentiality guarantees.
-- **Model choice:** the library gets the token IDs it needs from the
-  model's tokenizer, so you can switch models without changing code.
+- **Fast and cheap:** about 150 ms per decision, network included; you
+  pay almost only for input tokens.
+- **Inputs:** up to 1M tokens of context, images, up to 191 options per question.
+- **Calibrated:** by default, and fitted to your task from a few labels.
+- **Confidential:** on [Privatemode AI](https://privatemode.ai), data stays
+  encrypted while it's processed, and the deployment's attestation is
+  verified before anything is sent.
+- **Portable:** any vLLM-backed, OpenAI-compatible server works (without
+  the confidentiality guarantees).
 
-The repository contains `decisions/`, a Python library
-and a sample web app that shows the full probability distribution for each answer.
-See our
-[blog post](https://privatemode.ai/blog/system-one-from-glm-flash) for a high level explanation.
+The repository holds `decisions/`, a Python library, and a web app that
+shows the probability of every option. The
+[blog post](https://privatemode.ai/blog/system-one-from-glm-flash) explains
+the idea.
+
+## JevBench
+
+Public-item accuracy of the System One models in JevBench v1.4.2 (one
+pass, no thinking), down to Jev:
+
+| | public items |
+|---|---:|
+| Gemma 4 31B IT (Autoloops, Kushal Patil) | 0.928¹ |
+| NInfer (Qwen3.8-Flash-Next) | 0.896 |
+| JevOne (Qwen3.6-35B-A3B) | 0.896 |
+| **Privatemode Decisions (GLM-5.3-Flash)**² | **0.894** |
+| swanOne (Qwen3.8-Flash-Next) | 0.887 |
+| Jev-Omni (Gemma 4 12B) | 0.887 |
+| Cygnet (Gemma 4 12B) | 0.879 |
+| reflex-27b (Qwen3.8-27B) | 0.870 |
+| Jev 1.13.0 (TypeSafe) | 0.866 |
+| SimpleJev (Qwen3.8-27B) | 0.866 |
+| Instinct (ZooWork, Qwen3.8-27B) | 0.866 |
+
+¹ 350 of 377 items; every other row is out of the 231 public items.
+
+² Our own run (mean of two), not an official entry. The official runs
+also cover the sealed items, on which the systems above score 47 to 57
+points lower; we can't run those.
 
 ## Benchmark
 
-We compared Privatemode Decisions with TypeSafe's Jev and Convai's Laya on
-29 public labelled datasets in English and German, with 2 to 151 options
-and up to 1,000 examples each.
+We also compared 29 public labelled datasets in English and German,
+2 to 151 options, the same held-out examples for every system (up
+to 500 per dataset):
 
-| | Privatemode Decisions | Jev | Laya |
-|---|---|---|---|
-| Datasets it can answer | 29 | 28 | 27 |
-| Normalized accuracy | 0.585 | 0.574 | 0.422 |
-| Median latency, from Germany | 152 ms | 251 ms | runs locally |
-| EUR per 1,000 decisions | 0.062 | 0.016 | runs locally |
-| Calibration error without labels (excess ECE) | 0.032 | 0.080 | not measured |
+| | Privatemode Decisions | Jev |
+|---|---|---|
+| Datasets it can answer | 29 | 28 |
+| Mean accuracy, the 28 datasets Jev answers | **0.798** | 0.775 |
+| Median latency, from Germany | about 150 ms³ | 251 ms |
+| EUR per 1,000 decisions | 0.095 | 0.016 |
+| Calibration error without labels (excess ECE) | **0.032**³ | 0.080 |
 
-Normalized accuracy is 0 for always guessing a dataset's most common label
-and 1 for getting everything right, averaged across datasets. On the 28
-datasets both can answer, Privatemode Decisions and Jev are statistically
-indistinguishable. Jev can't read images, and Laya can't fit 151 options.
-The calibration error is what remains after the library's default
-temperature, beyond what sampling alone produces (0 is as calibrated as the
-test sets can show); Jev's is for its probabilities as returned, and 0.040
-if it gets a default temperature fitted the same way.
-Full results and methodology are in
+³ Measured with the state-first prompt, before the question also led it.
+
+On the same examples Privatemode Decisions is ahead of Jev on 16
+datasets, tied on 8 and behind on 3 (Wilcoxon p = 0.001). Jev can't read
+images. Our calibration error uses the default temperature formula
+fitted without the dataset at hand. The
+shipped temperatures, fitted on all datasets, give 0.016 with the current
+prompt against 0.023 with state first. Jev's is as returned (0.040 with a
+default temperature of its own). Methodology and full results:
 [privatemode-decisions-benchmark](https://github.com/edgelesssys/privatemode-decisions-benchmark).
 
 ## Quickstart
@@ -90,191 +112,134 @@ Full results and methodology are in
    # payments {'payments': 0.957, 'technical': 0.033, 'complaints': 0.01} 0.82
    ```
 
-The probabilities are calibrated by default: for the models we measured,
-the library divides the log probabilities by a pre-configured temperature
-before reporting them (see [Calibration](#calibration)).
-
-`confidence` ranges from 0 (probability spread evenly) to 1 (all of it on
-one option). It measures how sure the model is, not whether it's right,
-and works as a threshold for sending answers to human review; see
-[Calibration](#calibration) for how far the probabilities can be trusted.
-`result.model` is the model that answered, not the name you asked for: an
-alias such as `glm-flash-latest` comes back as `glm-5.3-flash`. Log it with
-each decision to see when an alias moves.
-To include
-images, pass `images=` with paths, bytes, Pillow images or data URLs, and
-use a vision model such as `glm-flash-latest`.
-
-To build the technique into your own stack with a coding agent, give it
-[the blog post](https://privatemode.ai/blog/system-one-from-glm-flash) and
-this repository. [AGENTS.md](AGENTS.md) lists what an implementation has to
-get right.
+`confidence` is 0 for probability spread evenly and 1 for all of it on one
+option: how sure the model is, not whether it's right. `result.model` is
+the model that answered (`glm-flash-latest` comes back as
+`glm-5.3-flash`); log it with each decision. For images, pass `images=`
+(paths, bytes, Pillow images or data URLs) with a vision model such as
+`glm-flash-latest`. To build the technique into your own stack, give a
+coding agent the blog post and this repository; [AGENTS.md](AGENTS.md)
+lists what an implementation has to get right.
 
 ## How it works
 
-The prompt numbers the options. The assistant's reply is prefilled with
-`answer=`, so the next token the model generates is the number of its
-choice. The request restricts generation to those tokens and returns their
-log probabilities. The library turns them into probabilities that sum to 1
-across your options.
+The prompt numbers the options and states the question before and after
+the state, so the model reads the state knowing what it is asked (+1.6
+points on the benchmark). The reply is prefilled with `answer=`; the
+request allows only the option numbers and returns their log
+probabilities, which the library normalizes over your options. The token
+IDs come from the serving tokenizer and are cached for ten minutes per
+model. The model can't answer "none of these" unless it's an option.
 
-The token IDs for each number depend on the model's tokenizer. The library
-gets them from the server, using `/completions` with `echo`, and caches
-them for ten minutes per model. The cache expires because an alias such as
-`glm-flash-latest` can move to a model with a different tokenizer.
+**Several questions about one state.** By default each request leads with
+its own question (`optimize="accuracy"`) and the requests go out in
+parallel. `optimize="cost"` leads every request with all of the call's
+questions, so they share a prefix (per option order) Privatemode can
+cache (from about 2,300 tokens), and seats it with one request first. It
+pays off only on states that long; on shorter ones it sends N question
+blocks per request for nothing. With five questions per state (timings
+with `mode="staged"`):
 
-Because the probabilities cover only your options, the model can't answer
-"none of these". Add it as an option if you need it.
+| `optimize` | accuracy vs state first | short states (p50) | 2,000-token states (p50, cached) |
+|---|---|---|---|
+| `"accuracy"` (default) | **+2.2 points** | **409 ms** | 935 ms, 0% |
+| `"cost"` | +0.9 points | 530 ms | **670 ms, 59%** |
+
+With one `history=` string for the call (a record that grows across
+calls) `optimize` defaults to `"cost"`, so the record is shared by the
+call's requests and by later calls with the same questions;
+`optimize="accuracy"` keeps the more accurate layout and shares the
+record per question only. A history per question (a mapping) is its
+request's alone, so there its own question leads by default.
 
 ## Calibration
 
-Raw probabilities from one token are overconfident: on the benchmark,
-confidence exceeded accuracy by 15 points on average. So the library
-softens them by default, with a temperature that depends on the number of
-options, measured per model: GLM-5.3-Flash, Kimi K2.6 and GLM-5.3 (and
-their `-latest` aliases). That removes most of the gap without any labels;
-other models keep their raw probabilities until they're measured. GLM-5.3
-puts only about two thirds of its probability on the options after
-`answer=`, so its answers are less reliable than Flash's or Kimi's.
+Raw one-token probabilities are overconfident (by 15 points on the
+benchmark). The library divides the log probabilities by a temperature
+from the number of options, measured for GLM-5.3-Flash, Kimi K2.6 and
+GLM-5.3 and their `-latest` aliases; other models stay raw. That removes
+most of the gap without labels, and held up on five untouched tasks.
+GLM-5.3 puts only about two thirds of its probability on the options, so
+its answers are less reliable than Flash's or Kimi's.
+`temperature="sentiment"` (or another task family) uses that family's
+value; `temperature=1` gives raw values.
 
-- `SystemOne(..., temperature="sentiment")` uses the temperature for a
-  task family (`intent`, `legal`, `moderation`, `nli`, `qa`, `sentiment`,
-  `topic`), which fits better if you know what kind of task it is.
-  `temperature=1` gives the raw probabilities.
-- With labelled answers from a random sample of your inputs, `calibrate()`
-  fits your task: a temperature and a bias per option, which corrects a
-  model that favours some options and so changes answers (+2.0 points of
-  accuracy from 100 labels on the benchmark, +1.0 from 20, +3.0 from 500).
-  It also gives two guarantees:
+With labels from a random sample of your inputs (not only escalated or
+disputed cases, which break all of the below), `calibrate()` fits your
+task:
 
-  ```python
-  from decisions import calibrate
+```python
+from decisions import calibrate
 
-  calibration = calibrate(answers, labels, coverage=0.9, max_error=0.05)
-  calibration.apply(new_answer).choice  # the corrected answer: use this one
-  calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
-  calibration.automate(new_answer)      # True: act on it; errors among these stay at most 5%
-  ```
+calibration = calibrate(answers, labels, coverage=0.9, max_error=0.05)
+calibration.apply(new_answer).choice  # the corrected answer: use this one
+calibration.predict_set(new_answer)   # ['payments'], or several options for a person to pick
+calibration.automate(new_answer)      # True: act on it; errors among these stay at most 5%
+```
 
-  `predict_set` contains the right option 90% of the time; with
-  `per_class=True` that holds for every option, which matters when one is
-  rare; an option with fewer than 9 labels (at 90%) is then in every set.
-  `automate` acts on answers whose top probability (after the
-  correction) clears a fitted threshold, and keeps the error among them at
-  most 5% with probability 90% over the choice of labels. That is the top
-  probability, not `answer.confidence`, which measures how peaked the whole
-  distribution is. A few hundred labels make both reliable, and a guarantee
-  costs automation: on the benchmark, a 5% error bound let about a fifth of
-  answers through, 10% about a third. `bias=False` fits the temperature
-  alone, which never changes an answer and automates a little more (27%
-  instead of 23% at a 10% bound with 100 labels). Label a random sample,
-  not only escalated cases.
-- `evaluate(answers, labels, calibration=...)` reports accuracy, ECE,
-  coverage and the error among automated answers, for a fresh audit sample:
-  refit with `calibrate()` when they drift.
-  [examples/audit_loop.py](examples/audit_loop.py) is such a loop.
-- `SystemOne(permutations=k)` asks in k option orders and averages. It keeps
-  the one-order default temperature, which measured as good as any other
-  choice without labels, and it didn't raise accuracy on the benchmark.
-
-**Which guarantee holds when.** The prediction sets cover the right option
-at the stated rate *on average over new inputs drawn like the labelled
-ones* (exchangeability); with `per_class=True`, for each option separately.
-The error bound on automated answers follows Learn then Test, but its
-candidate thresholds come from the labelled answers themselves rather than
-a grid fixed in advance, so its 90% over the choice of labels is tested on
-the benchmark, not proven. So is fitting the correction on the same labels
-as the cutoffs. For a temperature alone at most 1.1% of samples broke the
-bound (10% allowed); with a bias, cutoffs and threshold are set
-out-of-fold, and at most 1.1% did. Labels collected only from escalated or
-disputed cases break all of it.
-
-**Why calibration happens in the client.** The library receives the raw log
-probabilities and calibrates on your machine. You refit the temperature,
-bias, cutoffs and threshold on your own labels, and the labels never leave
-your infrastructure, which matters on a confidential-computing service.
-Services that return rounded or already-transformed probabilities only
-allow calibration stacked on top of their own transform: Jev rounds to 0.01
-and prices the right answer at exactly 0 in 4.3% of the benchmark's
-examples, so a temperature can't even be fitted without first patching the
-zeros.
-
-**What we tried and dropped.** Each was measured on the benchmark and
-didn't beat what the library does:
-
-- Dividing out the answer to a neutral input (contextual calibration): made
-  24 of 28 datasets worse, up to 16 points of accuracy; batch calibration
-  on unlabelled traffic cost 0.5 points on average. The bias they remove is
-  mostly real knowledge or the real class balance.
-- Averaging option orders (`permutations`) or a position prior (PriDe):
-  −0.3 points, not significant, for 4× the requests. Re-reading only
-  uncertain answers in more orders didn't help either, and a temperature
-  fitted per number of orders did worse than the one-order default.
-- Isotonic regression instead of a temperature: needs about 500 labels to
-  catch up. Predicting a task's temperature without labels (Thermometer
-  and similar): at most the gap from 0.032 to 0.006 excess ECE, half of
-  which 20 labels already close.
-- Clustered conformal sets for many options with few labels: no better than
-  one cutoff at a few labels per class.
-- Correcting answers by known class rates: needs rates as accurate as 100
-  labels would give, and hurts when they are off.
-- Probability left off the options (option mass): about 99% sits on the
-  options, right or wrong, so it says nothing about errors.
-
-The measurements, plots and method are in the benchmark's
-[calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration).
+It fits a temperature and a bias per option (+2.0 points of accuracy from
+100 labels on the benchmark; `bias=False` for the temperature alone).
+Prediction sets hold the right option 90% of the time, on average over
+inputs drawn like the labelled ones (`per_class=True`: for each option).
+Automation keeps the error among automated answers at most 5% with
+probability 90% over the labels (Learn then Test); its thresholds come
+from the labels themselves, so that is tested on the benchmark, not
+proven. `evaluate()` checks all of it on a fresh sample, and
+[examples/audit_loop.py](examples/audit_loop.py) refits on drift. It all
+runs in the client, so your labels stay with you. The
+[calibration report](https://github.com/edgelesssys/privatemode-decisions-benchmark/tree/main/results/calibration) has the numbers and
+what was tried and dropped.
 
 ## The web app
 
-The web app lets you try the library without writing code. Enter context
-and one or more questions, and it shows the probability of every option as
-a bar chart. Some of the prepared examples are trick questions that show
-what happens when a model has to answer without thinking first.
-
-The format is plain text:
-
-- A question is a line followed by a `choices:` line.
-- Options can have descriptions: `choices: repair = broken devices, sales = new orders`.
-- Every other line is context and is sent with every question.
-- Without any `choices:` line, the last line becomes a yes/no question.
-- Pasted or dropped images are sent as context and need a vision model.
-- The demo allows up to 10 questions and 32 options per question. These are
-  demo limits, not library limits.
-
-For example:
-
-```
-You are a phone agent answering calls.
-
-Which team should the call go to?
-choices: repair, human, sales
-
-Is this a valid request?
-choices: yes, no
-```
-
-To run it:
+Enter context and one or more questions; the app shows every option's
+probability as a bar chart. A question is a line followed by a `choices:`
+line (`choices: repair = broken devices, sales = new orders` for
+descriptions); every other line is context; without a `choices:` line the
+last line becomes a yes/no question; pasted images are sent as context.
+The demo allows 10 questions and 32 options per question.
 
 ```sh
 uv venv --python 3.14 .venv && uv pip install -e '.[dev]'
 cp .env.example .env         # proxy URL and Privatemode API key
-./run.sh                     # http://127.0.0.1:8600
+./run.sh                     # http://127.0.0.1:8600, with the proxy on localhost:8080
 .venv/bin/pytest -q tests    # no model needed
-sh deploy.sh                 # docker compose on a host, behind your reverse proxy
+sh deploy.sh                 # docker compose with its own proxy, behind your reverse proxy
 ```
 
-`./run.sh` expects the proxy from the Quickstart on `localhost:8080`.
-`docker compose` starts its own proxy, which only the app can reach. The
-app is a showcase and sends every visitor's questions with the single key
-in `.env`. If you make it public, add authentication or rate limiting.
+The app sends every visitor's questions with the single key in `.env`; if
+you make it public, add authentication or rate limiting.
 
 ## Layout
 
 ```
-decisions/       the library: client, token oracle, prompt building, images
-app/parse.py     parses the text box into context and questions, with helpful errors
-app/samples.py   the prepared examples and why each one is there
-app/main.py      FastAPI: /api/ask, /api/parse, /api/samples, /api/models
+decisions/       the library: client, token oracle, prompt building, calibration, images
+app/             the web app: parser, prepared examples, FastAPI endpoints
 web/index.html   the page: editor, image thumbnails, example chips, bar charts
-tests/           parser, token oracle, batching, decoding and API tests against fakes
+examples/        the audit loop
+tests/           everything above against fakes
 ```
+
+## Changelog
+
+### Accuracy: the question comes first ([#3](https://github.com/edgelesssys/privatemode-decisions/pull/3))
+
+- The prompt states the question before the state as well as after it:
+  +1.6 points on the benchmark and 0.885 → 0.894 on JevBench, for 1.6×
+  the prompt tokens; MMLU-Pro drops from 63.1% to 61.9%. The default
+  temperatures still fit.
+- `optimize="accuracy"` (default) leads each request with its own question;
+  `"cost"` with all of the call's, for a cacheable prefix. Unset, it is
+  `"cost"` with one history for all questions. `mode` defaults to parallel
+  unless the requests share more than the preamble. The state-first
+  prompt is gone; `a9f94ef` reproduces its results.
+
+### Calibration ([#2](https://github.com/edgelesssys/privatemode-decisions/pull/2))
+
+- Calibrated by default, with a temperature per measured model and number
+  of options (excess ECE 0.129 → 0.032 without labels).
+- `calibrate()` fits a temperature and a bias per option (+2.0 points from
+  100 labels), with prediction sets and an error bound for automated
+  answers; `evaluate()` and the audit loop check them.
+- The prefill is `answer=`; answers carry `option_mass`, the `temperature`
+  and the `model` they came from.
