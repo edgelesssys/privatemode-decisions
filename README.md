@@ -232,7 +232,7 @@ tests/           everything above against fakes
   `"cost"` with all of the call's, for a cacheable prefix. Unset, it is
   `"cost"` with one history for all questions. `mode` defaults to parallel
   unless the requests share more than the preamble. The state-first
-  prompt is gone; `ae35442` reproduces its results.
+  prompt is gone; `a9f94ef` reproduces its results.
 
 ### Calibration ([#2](https://github.com/edgelesssys/privatemode-decisions/pull/2))
 
