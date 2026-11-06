@@ -386,7 +386,7 @@ def test_wrong_labels_at_the_top_dont_stop_automation_with_many_labels():
     assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[324]
     # Every fifth of them, 100 answers: the coarse start (25) is too close to
     # the first level that can pass (22) to split delta, so one sequence
-    # from the top, at the whole delta, as before.
+    # from the top, at the whole delta.
     few, few_right = confidences[::5], right[::5]
     assert _automation_threshold(few, few_right, 0.1, 0.1) == few[64]
 
