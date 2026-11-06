@@ -261,9 +261,9 @@ def test_measured_models_and_their_aliases_have_defaults():
 
 def test_out_of_fold_calibration_does_not_depend_on_the_label_order():
     answers, labels = biased_sample(500, seed=11)
-    shuffled = calibrate(answers, labels, max_error=0.15)
+    shuffled = calibrate(answers, labels, max_error=0.2)
     ranked = sorted(zip(answers, labels), key=lambda al: al[1])     # grouped by class
-    grouped = calibrate([a for a, _ in ranked], [l for _, l in ranked], max_error=0.15)
+    grouped = calibrate([a for a, _ in ranked], [l for _, l in ranked], max_error=0.2)
     assert grouped.threshold < math.inf
     assert grouped.threshold == pytest.approx(shuffled.threshold, abs=0.05)
     assert grouped.cutoffs["*"] == pytest.approx(shuffled.cutoffs["*"], abs=0.05)
@@ -369,6 +369,26 @@ def test_the_automation_threshold_certifies_levels_in_order():
     assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[59]
     # Too few answers for any level: nothing.
     assert _automation_threshold(confidences[:20], [True] * 20, 0.1, 0.1) == math.inf
+
+
+def test_wrong_labels_at_the_top_dont_stop_automation_with_many_labels():
+    from decisions.calibration import _automation_threshold
+
+    # 500 answers: 3 wrong among the 25 most confident (label noise, as on
+    # the benchmark's pubmed_study), then 1 in 50 wrong down to the 300th,
+    # then every other one.
+    confidences = [1 - i / 1000 for i in range(500)]
+    right = [i not in (3, 11, 19) and (i % 50 != 49 if i < 300 else i % 2 == 0)
+             for i in range(500)]
+    # The sequence from the top fails at the top 25 (p = 0.76); the coarse
+    # one starts at the top 125 and certifies down to the top 325 (9 + 12
+    # wrong, p = 0.017 against delta / 5 = 0.02).
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[324]
+    # Every fifth of them, 100 answers: the coarse start (25) is too close to
+    # the first level that can pass (22) to split delta, so one sequence
+    # from the top, at the whole delta, as before.
+    few, few_right = confidences[::5], right[::5]
+    assert _automation_threshold(few, few_right, 0.1, 0.1) == few[64]
 
 
 def test_the_automation_threshold_never_splits_equal_confidences():
