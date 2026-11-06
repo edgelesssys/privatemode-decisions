@@ -380,15 +380,41 @@ def test_wrong_labels_at_the_top_dont_stop_automation_with_many_labels():
     confidences = [1 - i / 1000 for i in range(500)]
     right = [i not in (3, 11, 19) and (i % 50 != 49 if i < 300 else i % 2 == 0)
              for i in range(500)]
-    # The sequence from the top fails at the top 25 (p = 0.76); the coarse
+    # The sequence from the top fails at the top 25 (p = 0.76); the late
     # one starts at the top 125 and certifies down to the top 325 (9 + 12
     # wrong, p = 0.017 against delta / 5 = 0.02).
     assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[324]
-    # Every fifth of them, 100 answers: the coarse start (25) is too close to
+    # Every fifth of them, 100 answers: a quarter (25) is too close to
     # the first level that can pass (22) to split delta, so one sequence
     # from the top, at the whole delta.
     few, few_right = confidences[::5], right[::5]
     assert _automation_threshold(few, few_right, 0.1, 0.1) == few[64]
+
+
+@pytest.mark.parametrize("n, last", [(172, 171), (173, 43)])
+def test_the_late_sequence_starts_at_twice_the_first_level(n, last):
+    from decisions.calibration import _automation_threshold
+
+    # At max_error = delta = 0.1 the first level that can pass is 22, so
+    # the second sequence starts once a quarter of the labels is 44: from
+    # 173. Two wrong answers among ranks 45-51 put the top 52 at p = 0.097:
+    # it passes the whole delta (172 labels automate all of them) but not
+    # 0.08 or 0.02, so with the split both sequences stop at the top 44.
+    # This is the split's cost.
+    confidences = [1 - i / 1000 for i in range(n)]
+    right = [i not in (45, 46) for i in range(n)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[last]
+
+
+def test_the_lower_threshold_of_the_two_sequences_wins():
+    from decisions.calibration import _automation_threshold
+
+    # 173 labels, one wrong answer at rank 51: the top 52 has p = 0.028,
+    # which ends the late sequence (delta / 5 = 0.02) at the top 44, while
+    # the one from the top (0.08) certifies every answer.
+    confidences = [1 - i / 1000 for i in range(173)]
+    right = [i != 50 for i in range(173)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[-1]
 
 
 def test_the_automation_threshold_never_splits_equal_confidences():

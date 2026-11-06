@@ -222,6 +222,14 @@ tests/           everything above against fakes
 
 ## Changelog
 
+### Automation with many labels ([#4](https://github.com/edgelesssys/privatemode-decisions/issues/4))
+
+- `calibrate(max_error=…)` runs a second test sequence from a quarter of
+  the labels once that is at least twice the first level (from about 180
+  labels at `max_error=0.1`), so a few wrong labels among the most
+  confident answers no longer stop automation. The two split `delta`;
+  below the switch nothing changes.
+
 ### Accuracy: the question comes first ([#3](https://github.com/edgelesssys/privatemode-decisions/pull/3))
 
 - The prompt states the question before the state as well as after it:

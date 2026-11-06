@@ -465,14 +465,15 @@ def _binomial_cdf(k: int, n: int, p: float) -> float:
     return min(1.0, math.exp(top) * math.fsum(math.exp(v - top) for v in logs))
 
 
-#: Where :func:`calibrate`'s coarse automation sequence starts, as a share
+#: Where :func:`calibrate`'s second automation sequence starts, as a share
 #: of the labels. A few wrong labels among the most confident answers end a
 #: sequence that starts at the top, however many labels follow; a test of
-#: this many answers absorbs them.
-COARSE_START = 0.25
-#: The share of ``delta`` the coarse sequence tests at. It tests hundreds
-#: of answers, so it needs little; the sequence from the top keeps the rest.
-COARSE_DELTA = 0.2
+#: a quarter of them absorbs them.
+LATE_START = 0.25
+#: The share of ``delta`` the late sequence tests at. Its tests hold at least
+#: twice as many answers as the first level, so it needs less; the sequence
+#: from the top keeps the rest.
+LATE_DELTA = 0.2
 
 
 def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
@@ -480,13 +481,13 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
     """Fixed-sequence binomial tests over levels of the labelled answers'
     own top probabilities (Learn then Test style): see :func:`calibrate`.
 
-    One sequence starts at the first level that could pass. Once the
-    coarse start (:data:`COARSE_START` of the labels) holds at least twice
-    that many answers, a second sequence starts there and tests at
-    :data:`COARSE_DELTA` of ``delta``, the first at the rest, and the lower
-    threshold wins. Both starts depend on the
-    number of labels, ``max_error`` and ``delta`` only, never on which
-    answers are wrong, so the union keeps the bound (Bonferroni)."""
+    One sequence starts at the first level that could pass. Once
+    :data:`LATE_START` of the labels holds at least twice that many answers,
+    a second sequence starts there and tests at :data:`LATE_DELTA` of
+    ``delta``, the first at the rest, and the lower threshold wins. Both
+    starts depend on the number of labels, ``max_error`` and ``delta``
+    only, never on which answers are wrong, so the union keeps the bound
+    (Bonferroni)."""
     pairs = sorted(zip(confidences, right, strict=True), key=lambda cr: -cr[0])
     conf = [cf for cf, _ in pairs]
     errors, running = [], 0
@@ -512,11 +513,11 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
             chosen = conf[n - 1]
         return chosen
 
-    coarse = math.ceil(len(conf) * COARSE_START)
-    if coarse < 2 * smallest(delta):
+    late = math.ceil(len(conf) * LATE_START)
+    if late < 2 * smallest(delta):
         return sequence(smallest(delta), delta)
-    fine, rough = delta * (1 - COARSE_DELTA), delta * COARSE_DELTA
-    return min(sequence(smallest(fine), fine), sequence(max(coarse, smallest(rough)), rough))
+    top, rest = delta * (1 - LATE_DELTA), delta * LATE_DELTA
+    return min(sequence(smallest(top), top), sequence(max(late, smallest(rest)), rest))
 
 
 def _cutoff(scores: list[float], coverage: float) -> float:
@@ -597,10 +598,11 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       ``1 - delta``. The procedure follows Learn then Test: thresholds that
       automate 5%, 10%, ... of the labelled answers are tested in order with
       an exact binomial test, stopping at the first that can't be certified.
-      From about 180 labels (at ``max_error=0.1``; 360 at 0.05) a second
-      sequence starts at a quarter of them, so a few wrong labels among the
-      most confident answers don't stop automation; the two sequences
-      split ``delta``, the coarse one taking a fifth.
+      Once a quarter of the labels is at least twice the first level that
+      can pass (from about 180 labels at ``max_error=0.1`` and the default
+      ``delta``), a second sequence starts there, so a few wrong labels
+      among the most confident answers don't stop automation; the two
+      split ``delta``, the second taking a fifth.
       The candidate thresholds are the labelled answers' own top
       probabilities rather than a grid fixed in advance, so the bound is
       validated on the benchmark, not exact.
