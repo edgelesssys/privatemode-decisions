@@ -465,29 +465,64 @@ def _binomial_cdf(k: int, n: int, p: float) -> float:
     return min(1.0, math.exp(top) * math.fsum(math.exp(v - top) for v in logs))
 
 
+#: Where :func:`calibrate`'s second automation sequence starts, as a share
+#: of the labels. A few wrong labels among the most confident answers end a
+#: sequence that starts at the top, however many labels follow; a test of
+#: a quarter of them absorbs them.
+LATE_START = 0.25
+#: The share of ``delta`` the late sequence tests at. Its tests hold at least
+#: twice as many answers as the first level, so it needs less; the sequence
+#: from the top keeps the rest.
+LATE_DELTA = 0.2
+
+
 def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
                           max_error: float, delta: float, step: float = 0.05) -> float:
     """Fixed-sequence binomial tests over levels of the labelled answers'
-    own top probabilities (Learn then Test style): see :func:`calibrate`."""
+    own top probabilities (Learn then Test style): see :func:`calibrate`.
+
+    One sequence starts at the first level that could pass. Once
+    :data:`LATE_START` of the labels holds at least twice that many answers,
+    a second sequence starts there and tests at :data:`LATE_DELTA` of
+    ``delta``, the first at the rest, and the lower threshold wins. Both
+    starts depend on the number of labels, ``max_error`` and ``delta``
+    only, never on which answers are wrong, so the union keeps the bound
+    (Bonferroni). From the late start on, the two test the same levels: once
+    the first sequence gets there, it adds its share to the late one's and
+    tests at the whole ``delta`` (the graphical form of the split, Bretz et
+    al. 2009).
+    """
     pairs = sorted(zip(confidences, right, strict=True), key=lambda cr: -cr[0])
     conf = [cf for cf, _ in pairs]
     errors, running = [], 0
     for _, ok in pairs:
         running += not ok
         errors.append(running)
-    smallest = math.ceil(math.log(delta) / math.log1p(-max_error))
-    chosen = math.inf
-    levels = round(1 / step)
-    for level in range(1, levels + 1):
-        n = math.ceil(len(conf) * level / levels)
-        while n < len(conf) and conf[n] == conf[n - 1]:
-            n += 1   # a threshold can't split a run of equal confidences
-        if n < smallest:
-            continue
-        if _binomial_cdf(errors[n - 1], n, max_error) > delta:
-            break
-        chosen = conf[n - 1]
-    return chosen
+
+    def smallest(level: float) -> int:
+        """The fewest answers that can pass at ``level``, with no errors."""
+        return math.ceil(math.log(level) / math.log1p(-max_error))
+
+    def sequence(start: int, level: float, whole_from: float = math.inf) -> float:
+        chosen = math.inf
+        levels = round(1 / step)
+        for i in range(1, levels + 1):
+            n = math.ceil(len(conf) * i / levels)
+            while n < len(conf) and conf[n] == conf[n - 1]:
+                n += 1   # a threshold can't split a run of equal confidences
+            if n < start:
+                continue
+            if _binomial_cdf(errors[n - 1], n, max_error) > (delta if n >= whole_from else level):
+                break
+            chosen = conf[n - 1]
+        return chosen
+
+    late = math.ceil(len(conf) * LATE_START)
+    if late < 2 * smallest(delta):
+        return sequence(smallest(delta), delta)
+    top, rest = delta * (1 - LATE_DELTA), delta * LATE_DELTA
+    late = max(late, smallest(rest))
+    return min(sequence(smallest(top), top, whole_from=late), sequence(late, rest))
 
 
 def _cutoff(scores: list[float], coverage: float) -> float:
@@ -568,6 +603,12 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       ``1 - delta``. The procedure follows Learn then Test: thresholds that
       automate 5%, 10%, ... of the labelled answers are tested in order with
       an exact binomial test, stopping at the first that can't be certified.
+      Once a quarter of the labels is at least twice the first level that
+      can pass (from 173 labels at ``max_error=0.1`` and the default
+      ``delta``), a second sequence starts there, so a few wrong labels
+      among the most confident answers don't stop automation; the two
+      split ``delta``, the second taking a fifth; once the first reaches the
+      second's start, it tests at the whole ``delta``.
       The candidate thresholds are the labelled answers' own top
       probabilities rather than a grid fixed in advance, so the bound is
       validated on the benchmark, not exact.

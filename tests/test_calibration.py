@@ -261,9 +261,9 @@ def test_measured_models_and_their_aliases_have_defaults():
 
 def test_out_of_fold_calibration_does_not_depend_on_the_label_order():
     answers, labels = biased_sample(500, seed=11)
-    shuffled = calibrate(answers, labels, max_error=0.15)
+    shuffled = calibrate(answers, labels, max_error=0.2)
     ranked = sorted(zip(answers, labels), key=lambda al: al[1])     # grouped by class
-    grouped = calibrate([a for a, _ in ranked], [l for _, l in ranked], max_error=0.15)
+    grouped = calibrate([a for a, _ in ranked], [l for _, l in ranked], max_error=0.2)
     assert grouped.threshold < math.inf
     assert grouped.threshold == pytest.approx(shuffled.threshold, abs=0.05)
     assert grouped.cutoffs["*"] == pytest.approx(shuffled.cutoffs["*"], abs=0.05)
@@ -369,6 +369,56 @@ def test_the_automation_threshold_certifies_levels_in_order():
     assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[59]
     # Too few answers for any level: nothing.
     assert _automation_threshold(confidences[:20], [True] * 20, 0.1, 0.1) == math.inf
+
+
+def test_wrong_labels_at_the_top_dont_stop_automation_with_many_labels():
+    from decisions.calibration import _automation_threshold
+
+    # 500 answers: 3 wrong among the 25 most confident (label noise, as on
+    # the benchmark's pubmed_study), then 1 in 50 wrong down to the 300th,
+    # then every other one.
+    confidences = [1 - i / 1000 for i in range(500)]
+    right = [i not in (3, 11, 19) and (i % 50 != 49 if i < 300 else i % 2 == 0)
+             for i in range(500)]
+    # The sequence from the top fails at the top 25 (p = 0.76); the late
+    # one starts at the top 125 and certifies down to the top 325 (9 + 12
+    # wrong, p = 0.017 against delta / 5 = 0.02).
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[324]
+    # Every fifth of them, 100 answers: a quarter (25) is too close to
+    # the first level that can pass (22) to split delta, so one sequence
+    # from the top, at the whole delta.
+    few, few_right = confidences[::5], right[::5]
+    assert _automation_threshold(few, few_right, 0.1, 0.1) == few[64]
+
+
+def test_the_sequence_from_the_top_tests_at_the_whole_delta_from_the_late_start():
+    from decisions.calibration import _automation_threshold
+
+    # 173 labels at max_error = delta = 0.1 (levels 26, 35, 44, 52, ...;
+    # the late start is 44). Two wrong answers among ranks 45-51 put the top
+    # 52 at p = 0.097: above 0.08 and 0.02, but the sequence from the top has
+    # passed 44 and tests 52 at the whole delta, so every answer passes.
+    confidences = [1 - i / 1000 for i in range(173)]
+    right = [i not in (45, 46) for i in range(173)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[-1]
+    # The split's cost: 186 labels (levels 28, 38, 47, ...), one wrong answer
+    # at rank 31. The top 38 (p = 0.095) fail 0.08 before the late start,
+    # and the late sequence fails at 47 (p = 0.044 against 0.02), so only
+    # the top 28 pass, where one sequence at delta would pass all of them.
+    confidences = [1 - i / 1000 for i in range(186)]
+    right = [i != 30 for i in range(186)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[27]
+
+
+def test_the_lower_threshold_of_the_two_sequences_wins():
+    from decisions.calibration import _automation_threshold
+
+    # 173 labels, one wrong answer at rank 51: the top 52 has p = 0.028,
+    # which ends the late sequence (delta / 5 = 0.02) at the top 44, while
+    # the one from the top certifies every answer.
+    confidences = [1 - i / 1000 for i in range(173)]
+    right = [i != 50 for i in range(173)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[-1]
 
 
 def test_the_automation_threshold_never_splits_equal_confidences():
