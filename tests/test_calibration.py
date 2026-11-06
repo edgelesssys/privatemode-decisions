@@ -391,19 +391,23 @@ def test_wrong_labels_at_the_top_dont_stop_automation_with_many_labels():
     assert _automation_threshold(few, few_right, 0.1, 0.1) == few[64]
 
 
-@pytest.mark.parametrize("n, last", [(172, 171), (173, 43)])
-def test_the_late_sequence_starts_at_twice_the_first_level(n, last):
+def test_the_sequence_from_the_top_tests_at_the_whole_delta_from_the_late_start():
     from decisions.calibration import _automation_threshold
 
-    # At max_error = delta = 0.1 the first level that can pass is 22, so
-    # the second sequence starts once a quarter of the labels is 44: from
-    # 173. Two wrong answers among ranks 45-51 put the top 52 at p = 0.097:
-    # it passes the whole delta (172 labels automate all of them) but not
-    # 0.08 or 0.02, so with the split both sequences stop at the top 44.
-    # This is the split's cost.
-    confidences = [1 - i / 1000 for i in range(n)]
-    right = [i not in (45, 46) for i in range(n)]
-    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[last]
+    # 173 labels at max_error = delta = 0.1 (levels 26, 35, 44, 52, ...;
+    # the late start is 44). Two wrong answers among ranks 45-51 put the top
+    # 52 at p = 0.097: above 0.08 and 0.02, but the sequence from the top has
+    # passed 44 and tests 52 at the whole delta, so every answer passes.
+    confidences = [1 - i / 1000 for i in range(173)]
+    right = [i not in (45, 46) for i in range(173)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[-1]
+    # The split's cost: 186 labels (levels 28, 38, 47, ...), one wrong answer
+    # at rank 31. The top 38 (p = 0.095) fail 0.08 before the late start,
+    # and the late sequence fails at 47 (p = 0.044 against 0.02), so only
+    # the top 28 pass, where one sequence at delta would pass all of them.
+    confidences = [1 - i / 1000 for i in range(186)]
+    right = [i != 30 for i in range(186)]
+    assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[27]
 
 
 def test_the_lower_threshold_of_the_two_sequences_wins():
@@ -411,7 +415,7 @@ def test_the_lower_threshold_of_the_two_sequences_wins():
 
     # 173 labels, one wrong answer at rank 51: the top 52 has p = 0.028,
     # which ends the late sequence (delta / 5 = 0.02) at the top 44, while
-    # the one from the top (0.08) certifies every answer.
+    # the one from the top certifies every answer.
     confidences = [1 - i / 1000 for i in range(173)]
     right = [i != 50 for i in range(173)]
     assert _automation_threshold(confidences, right, 0.1, 0.1) == confidences[-1]

@@ -487,7 +487,11 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
     ``delta``, the first at the rest, and the lower threshold wins. Both
     starts depend on the number of labels, ``max_error`` and ``delta``
     only, never on which answers are wrong, so the union keeps the bound
-    (Bonferroni)."""
+    (Bonferroni). From the late start on, the two test the same levels: once
+    the first sequence gets there, it adds its share to the late one's and
+    tests at the whole ``delta`` (the graphical form of the split, Bretz et
+    al. 2009).
+    """
     pairs = sorted(zip(confidences, right, strict=True), key=lambda cr: -cr[0])
     conf = [cf for cf, _ in pairs]
     errors, running = [], 0
@@ -499,7 +503,7 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
         """The fewest answers that can pass at ``level``, with no errors."""
         return math.ceil(math.log(level) / math.log1p(-max_error))
 
-    def sequence(start: int, level: float) -> float:
+    def sequence(start: int, level: float, whole_from: float = math.inf) -> float:
         chosen = math.inf
         levels = round(1 / step)
         for i in range(1, levels + 1):
@@ -508,7 +512,7 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
                 n += 1   # a threshold can't split a run of equal confidences
             if n < start:
                 continue
-            if _binomial_cdf(errors[n - 1], n, max_error) > level:
+            if _binomial_cdf(errors[n - 1], n, max_error) > (delta if n >= whole_from else level):
                 break
             chosen = conf[n - 1]
         return chosen
@@ -517,7 +521,8 @@ def _automation_threshold(confidences: Sequence[float], right: Sequence[bool],
     if late < 2 * smallest(delta):
         return sequence(smallest(delta), delta)
     top, rest = delta * (1 - LATE_DELTA), delta * LATE_DELTA
-    return min(sequence(smallest(top), top), sequence(max(late, smallest(rest)), rest))
+    late = max(late, smallest(rest))
+    return min(sequence(smallest(top), top, whole_from=late), sequence(late, rest))
 
 
 def _cutoff(scores: list[float], coverage: float) -> float:
@@ -599,7 +604,7 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       automate 5%, 10%, ... of the labelled answers are tested in order with
       an exact binomial test, stopping at the first that can't be certified.
       Once a quarter of the labels is at least twice the first level that
-      can pass (from about 180 labels at ``max_error=0.1`` and the default
+      can pass (from 173 labels at ``max_error=0.1`` and the default
       ``delta``), a second sequence starts there, so a few wrong labels
       among the most confident answers don't stop automation; the two
       split ``delta``, the second taking a fifth.
