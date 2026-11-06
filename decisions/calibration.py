@@ -607,7 +607,8 @@ def calibrate(answers: Sequence[ChoiceAnswer], labels: Sequence[str], *,
       can pass (from 173 labels at ``max_error=0.1`` and the default
       ``delta``), a second sequence starts there, so a few wrong labels
       among the most confident answers don't stop automation; the two
-      split ``delta``, the second taking a fifth.
+      split ``delta``, the second taking a fifth; once the first reaches the
+      second's start, it tests at the whole ``delta``.
       The candidate thresholds are the labelled answers' own top
       probabilities rather than a grid fixed in advance, so the bound is
       validated on the benchmark, not exact.
